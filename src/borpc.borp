@@ -176,6 +176,24 @@ private function genStatement(statement: table): str {
             return "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "}\n"
         }
     }
+    if (statement.type == statementTypes.FOR_STATEMENT) {
+        if (statement.isCStyle) {
+            c1 = genExpr(statement.clause1)
+            c2 = genExpr(statement.clause2)
+            c3 = genExpr(statement.clause3)
+
+            return "for (" + c1 + "; " + c2 + "; " + c3 + ") {\n" + genStatementList(statement.body) + "}\n"
+        } else {
+            varName: str = statement.clause1.name
+            startVal: str = genExpr(statement.clause1.value)
+            stopVal: str = genExpr(statement.clause2)
+            stepVal: str = "1"
+            if (statement.clause3 ~= null) {
+                stepVal = genExpr(statement.clause3)
+            }
+            return "for (double " + varName + " = " + startVal + "; " + varName + " <= " + stopVal + "; " + varName + " += " + stepVal + ") {\n" + genStatementList(statement.body) + "}\n"
+        }
+    }
 }
 
 function generateProgram(statements: array): str {
@@ -202,7 +220,7 @@ function generateProgram(statements: array): str {
 }
 
 function testCompiler(source: str) {
-    source = readFile("tests/test.borp")
+    source = readFile("src/test.borp")
 
     // 2. Lex & Parse
     tokens = tokenize(lexerState(source))
@@ -212,7 +230,7 @@ function testCompiler(source: str) {
     cCode = generateProgram(ast)
 
     // 4. Save the .c file
-    writeFile("tests/math_test.c", cCode)
+    writeFile("math_test.c", cCode)
 }
 
 testCompiler("x: num = 10\ny: num = 20\ntotal: num = (x + y) * 2\nif total > 50 {\n    total = total - 5\n} else {\n    total = total + 5\n}\nwhile total > 0 {\n    total = total - 1\n}")
