@@ -105,6 +105,8 @@ private function cType(typeAnno: num): str {
         return "const char*"
     } elseif (typeAnno == types.BOOLEAN) {
         return "bool"
+    } elseif (typeAnno == types.ENUM) {
+        return "enum"
     }
 
     return "void"
@@ -151,6 +153,20 @@ private function genStatement(statement: table): str {
     }
     if (statement.type == statementTypes.VARDECLARE_STATEMENT) {
         typeStr = cType(statement.typeAnnotation)
+
+        if (statement.initializer.type == astTypes.ENUM_EXPR) {
+            enumMembers: str = ""
+            for i = 0, length(statement.initializer) - 1 {
+                member: table = statement.initializer.members[i]
+                if (i < length(statement.initializer.members) - 1) {
+                    enumMembers = enumMembers + member.name + ",\n"
+                } else {
+                    enumMembers = enumMembers + member.name
+                }
+            }
+            return typeStr + " " + statement.name + " {\n" + enumMembers +  "};\n"
+        }
+
         return typeStr + " " + statement.name + " = " + genExpr(statement.initializer) + ";\n"
     }
     if (statement.type == statementTypes.RETURN_STATEMENT) {
