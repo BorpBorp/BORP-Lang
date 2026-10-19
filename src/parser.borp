@@ -1,0 +1,780 @@
+import "lexer.borp"
+import "ast.borp"
+import "tokentypes.borp"
+
+function parseState(tokens: array) {
+    state: table = {
+        tokens = tokens,
+        cursor: num = 0
+    }
+
+    return state
+}
+
+function parseProgram(state) {
+    statements: array = []
+
+    while (!isAtEnd(state)) {
+        while (check(state, tokenTypes.NEWLINE)) {
+            advance(state)
+        }
+        if (isAtEnd(state)) {
+            break
+        }
+        push(statements, statement(state))
+    }
+
+    return statements
+}
+
+function check(state: table, expectedType): bool {
+    if (isAtEnd(state)) { 
+        return false
+    }
+
+    tok = peek(state)
+
+    return tok.type == expectedType
+}
+
+function match(state: table, expectedType) {
+    if (check(state, expectedType)) {
+        tok = peek(state)
+        move(state)
+        return tok
+    }
+
+    return null
+}
+
+function matchMulti(state: table, expectedTypes) {
+    for i = 0, length(expectedTypes) - 1 {
+        if (check(state, expectedTypes[i])) {
+            move(state)
+            return true
+        }
+    }
+    return false
+}
+
+function consume(state: table, expectedType, errorMsg: str) {
+    if (check(state, expectedType)) {
+        tok = peek(state)
+        move(state)
+        return tok
+    }
+
+    tok = peek(state)
+
+    print("Parser Error on line " + tok.line + ": " + errorMsg)
+
+    return null
+}
+
+function advance(state: table): table {
+    token: table = peek(state)
+    move(state)
+    return token
+}
+
+private function expect(state: table, expectedType, errorMsg: str) {
+    return consume(state, expectedType, errorMsg)
+}
+
+private function expression(state: table) {
+    return assignment(state)
+}
+
+private function parseTypeAnnotation(state: table): num {
+    tokenType: table = expect(state, tokenTypes.IDENTIFIER, "expected type name")
+
+    if (tokenType.value == "number" || tokenType.value == "num") { return types.NUMBER }
+    if (tokenType.value == "integer" || tokenType.value == "int") { return types.INTEGER }
+    if (tokenType.value == "double" || tokenType.value == "dbl") { return types.DOUBLE }
+    if (tokenType.value == "float" || tokenType.value == "flt") { return types.FLOAT }
+    if (tokenType.value == "string" || tokenType.value == "str") { return types.STRING }
+    if (tokenType.value == "bool" || tokenType.value == "boolean") { return types.BOOLEAN }
+    if (tokenType.value == "table" || tokenType.value == "tbl") { return types.TABLE }
+    if (tokenType.value == "enum" || tokenType.value == "enumeration") { return types.ENUM }
+    if (tokenType.value == "any") { return types.ANY }
+    if (tokenType.value == "array") { return types.ARRAY }
+
+    print("Unknown type " + "'" + tokenType.value + "' " + tokenType.line)
+    return -1
+}
+
+private function desugarEnumTable(tableExpr: table): table {
+    members: array = []
+
+    for i = 0, length(tableExpr.fields) - 1 {
+        field = tableExpr.fields[i]
+
+        if (field.value.type ~= astTypes.NUMBER_EXPR) {
+            print("parser error: enum member '" + field.key + "' must have a constant numeric value on line " + field.value.line)
+        }
+
+        numericVal = field.value.value
+        push(members, {name = field.key, value = numericVal})
+    }
+
+    return makeEnumExpr(members, tableExpr.line)
+}
+
+private function statementList(state: table, tokens: array) {
+    statementList: array = []
+
+    while (!isAtEnd(state)) {
+        atTerminator: bool = false
+        for i = 0, length(tokens) - 1 {
+            if (check(state, tokens[i])) {
+                atTerminator = true
+                break
+            }
+        }
+        if (atTerminator) {
+            break
+        }
+        push(statementList, statement(state))
+    }
+    return statementList
+}
+
+private function statement(state: table) {
+    if (check(state, tokenTypes.PRIVATE)) {
+        privToken = advance(state)
+        isPrivate: bool = true
+        inner: table = {}
+
+        if (check(state, tokenTypes.FUNCTION)) {
+            inner = functionStatement(state, isPrivate)
+        } elseif (check(state, tokenTypes.IDENTIFIER) && peekNext(state).type == tokenTypes.COLON) {
+            inner = varDeclareStatement(state, isPrivate)
+        } else {
+            print("'private' can only be used to modify a function or a typed variable declaration line: " + privToken.line)
+        }
+
+        return inner
+    }
+
+    isPrivate: bool = false
+
+    if (check(state, tokenTypes.IMPORT)) {
+        return importStatement(state)
+    }
+    if (check(state, tokenTypes.LOCAL)) {
+        return localStatement(state, true) // Should always be private so we pass it true without storing it previously (magic bool)
+    }
+
+    if (check(state, tokenTypes.IDENTIFIER) && peekNext(state).type == tokenTypes.COLON) {
+        return varDeclareStatement(state, isPrivate)
+    }
+
+    if (check(state, tokenTypes.WHILE)) {
+        return whileStatement(state)
+    }
+    if (check(state, tokenTypes.IF)) {
+        return ifStatement(state)
+    }
+    if (check(state, tokenTypes.LBRACE)) {
+        return blockStatement(state)
+    }
+    if (check(state, tokenTypes.FUNCTION)) {
+        return functionStatement(state, isPrivate)
+    }
+    if (check(state, tokenTypes.RETURN)) {
+        return returnStatement(state)
+    }
+    if (check(state, tokenTypes.BREAK)) {
+        return breakStatement(state)
+    }
+    if (check(state, tokenTypes.FOR)) {
+        return forStatement(state)
+    }
+
+    return expressionStatement(state)
+}
+
+private function importStatement(state: table) {
+    line: num = advance(state).line
+
+    pathToken = expect(state, tokenTypes.STRING, "expected string path after 'import'")
+    path: str = pathToken.value
+
+    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+
+    return makeImportStatement(path, line)
+}
+
+private function localStatement(state: table, isPrivate: bool) {
+    line: num = advance(state).line
+
+    nameToken = expect(state, tokenTypes.IDENTIFIER, "expected a variable name after 'local'")
+    name: str = nameToken.value
+
+    declaredType = types.ANY
+    if (match(state, tokenTypes.COLON)) {
+        declaredType = parseTypeAnnotation(state)
+    }
+
+    expect(state, tokenTypes.ASSIGN, "expected '=' after variable name in 'local' declaration")
+    initializer = expression(state)
+
+    if (declaredType == types.ENUM) {
+        if (initializer.type ~= astTypes.TABLE_EXPR) {
+            print("expected a table literal ('{...}') to initialize an enum")
+        }
+        initializer = desugarEnumTable(initializer)
+    }
+
+    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+
+    if (isPrivate == null) {
+        isPrivate = true
+    }
+
+    return makeVarDeclareStatement(name, initializer, declaredType, isPrivate, line)
+}
+
+private function breakStatement(state: table) {
+    line: num = advance(state).line
+
+    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+
+    return makeBreakStatement(line)
+}
+
+private function whileStatement(state: table) {
+    line: num = peek(state).line
+    move(state)
+
+    condition = expression(state)
+
+    body: array = []
+
+    if (check(state, tokenTypes.LBRACE)) {
+        move(state)
+        body = statementList(state, [tokenTypes.RBRACE])
+        expect(state, tokenTypes.RBRACE, "expected '}' to close while body")
+    } else {
+        match(state, tokenTypes.DO)
+        body = statementList(state, [tokenTypes.END])
+        expect(state, tokenTypes.END, "expected 'end' to close while loop")
+    }
+
+    return makeWhileStatement(condition, body, line)
+}
+
+private function forStatement(state: table) {
+    line: num = advance(state).line
+
+    clause1 = expression(state)
+    expect(state, tokenTypes.COMMA, "expected ',' after first for-loop clause")
+
+    clause2 = expression(state)
+    
+    isCStyle = false
+    if (clause2.type == astTypes.BINARY_EXPR) {
+        op = clause2.tokenType
+        if (op == tokenTypes.LESSER || op == tokenTypes.LESSER_EQUAL || op == tokenTypes.GREATER || op == tokenTypes.GREATER_EQUAL || op == tokenTypes.EQUALS || op == tokenTypes.NOT_EQUAL) {
+            isCStyle = true
+        }
+    }
+
+    clause3 = null
+
+    if (isCStyle) {
+        expect(state, tokenTypes.COMMA, "expected ',' before for-loop increment")
+        clause3 = expression(state)
+    } elseif (match(state, tokenTypes.COMMA)) {
+        clause3 = expression(state)
+    }
+
+    body: array = []
+    if (match(state, tokenTypes.LBRACE)) {
+        body = statementList(state, [tokenTypes.RBRACE])
+        expect(state, tokenTypes.RBRACE, "expected '}' to close for-loop body")
+    } else {
+        match(state, tokenTypes.DO)
+        body = statementList(state, [tokenTypes.END])
+        expect(state, tokenTypes.END, "expected 'end' to close for-loop")
+    }
+
+    return makeForStatement(clause1, clause2, clause3, isCStyle, body, line)
+}
+
+private function functionStatement(state: table, isPrivate: bool) {
+    line: num = advance(state).line
+    nameToken = expect(state, tokenTypes.IDENTIFIER, "expected function name")
+
+    expect(state, tokenTypes.LPAREN, "expected '(' after function name")
+    params: array = []
+    if (!check(state, tokenTypes.RPAREN)) {
+        while (true) {
+            param = expect(state, tokenTypes.IDENTIFIER, "expected parameter name")
+            paramType = types.ANY
+
+            if (match(state, tokenTypes.COLON)) {
+                paramType = parseTypeAnnotation(state)
+            }
+            push(params, {name = param.value, type = paramType})
+
+            if (!match(state, tokenTypes.COMMA)) {
+                break
+            }
+        }
+    }
+    expect(state, tokenTypes.RPAREN, "expected ')' after parameters")
+
+    returnType = types.ANY
+    if (match(state, tokenTypes.COLON)) {
+        returnType = parseTypeAnnotation(state)
+    }
+
+    parentName: str = ""
+    parentArgs: array = []
+    isLazy: bool = false
+
+    if (match(state, tokenTypes.INHERIT)) {
+        isLazy = match(state, tokenTypes.LAZY) != null
+        pToken = expect(state, tokenTypes.IDENTIFIER, "expected parent function name after '->'")
+        parentName = pToken.value
+    }
+
+    body: array = []
+    if (match(state, tokenTypes.LBRACE)) {
+        body = statementList(state, [tokenTypes.RBRACE])
+        expect(state, tokenTypes.RBRACE, "expected '}' to close function body")
+    } else {
+        body = statementList(state, [tokenTypes.END])
+        expect(state, tokenTypes.END, "expected 'end' to close function body")
+    }
+
+    if (isPrivate == null) {
+        isPrivate = false
+    }
+
+    return makeFunctionStatement(nameToken.value, params, body, parentName, parentArgs, returnType, isLazy, isPrivate, line)
+}
+
+private function returnStatement(state: table) {
+    line: num = advance(state).line
+
+    value = null
+
+    if (!check(state, tokenTypes.SEMICOLON) && !check(state, tokenTypes.END) && !check(state, tokenTypes.RBRACE) && !check(state, tokenTypes.NEWLINE)) {
+        value = expression(state)
+    }
+
+    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+
+    return makeReturnStatement(value, line)
+}
+
+private function varDeclareStatement(state: table, isPrivate: bool) {
+    nameToken = advance(state)
+    line: num = nameToken.line
+
+    move(state)
+
+    declaredType = parseTypeAnnotation(state)
+
+    if (declaredType ~= types.ENUM) {
+        expect(state, tokenTypes.ASSIGN, "expected '=' after type annotation")
+    } elseif (check(state, tokenTypes.ASSIGN)) {
+        move(state)
+    }
+
+    initializer = expression(state)
+
+    if (declaredType == types.ENUM) {
+        if (initializer.type ~= astTypes.TABLE_EXPR) {
+            print("Expected a table literal '{...}' to initialize an enum on line: " + line)
+        }
+        initializer = desugarEnumTable(initializer)
+    }
+
+    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+
+    if (isPrivate == null) {
+        isPrivate = false
+    }
+
+    return makeVarDeclareStatement(nameToken.value, initializer, declaredType, isPrivate, line)
+}
+
+private function ifStatement(state: table) {
+    line: num = peek(state).line
+    move(state)
+
+    condition = expression(state)
+    thenBranch: array = []
+    elseBranch: array = []
+
+    if (check(state, tokenTypes.LBRACE)) {
+        move(state)
+
+        thenBranch = statementList(state, [tokenTypes.RBRACE])
+        expect(state, tokenTypes.RBRACE, "expected '}' to close body")
+
+        if (check(state, tokenTypes.ELSEIF)) {
+            push(elseBranch, ifStatement(state))
+        } elseif (match(state, tokenTypes.ELSE)) {
+            expect(state, tokenTypes.LBRACE, "expected '{' to open else body")
+            elseBranch = statementList(state, [tokenTypes.RBRACE])
+            expect(state, tokenTypes.RBRACE, "expected '}' to close else body")
+        }
+    } else {
+        expect(state, tokenTypes.THEN, "expected 'then' or '{' after condition")
+        thenBranch = statementList(state, [tokenTypes.ELSEIF, tokenTypes.ELSE, tokenTypes.END])
+
+        if (check(state, tokenTypes.ELSEIF)) {
+            push(elseBranch, ifStatement(state))
+        } elseif (match(state, tokenTypes.ELSE)) {
+            elseBranch = statementList(state, [tokenTypes.END])
+            expect(state, tokenTypes.END, "expected 'end' to close if statement")
+        } else {
+            expect(state, tokenTypes.END, "expected 'end' to close if statement")
+        }
+    }
+
+    return makeIfStatement(condition, thenBranch, elseBranch, line)
+}
+
+private function blockStatement(state: table) {
+    line: num = peek(state).line
+    move(state)
+    statements = statementList(state, [tokenTypes.RBRACE]) // Not made yet so can't test this line specifically
+
+    expect(state, tokenTypes.RBRACE, "expected '}' to close block")
+    return makeBlockStatement(statements, line)
+}
+
+private function expressionStatement(state: table) {
+    line: num = peek(state).line
+    expr = expression(state)
+
+    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+    return makeExpressionStatement(expr, line)
+}
+
+private function logicalAnd(state: table) {
+    expr = equality(state)
+
+    while (check(state, tokenTypes.AND)) {
+        token: table = advance(state)
+        right = equality(state)
+        expr = makeBinaryExpr(token.type, expr, right, token.line)
+    }
+    return expr
+}
+
+private function logicalOr(state: table) {
+    expr = logicalAnd(state)
+
+    while (check(state, tokenTypes.OR)) {
+        token: table = advance(state)
+        right = logicalAnd(state)
+        expr = makeBinaryExpr(token.type, expr, right, token.line)
+    }
+    return expr
+}
+
+private function equality(state: table) {
+    expr = relational(state)
+
+    while (check(state, tokenTypes.EQUALS) || check(state, tokenTypes.NOT_EQUAL)) {
+        token: table = advance(state)
+        right = relational(state)
+        expr = makeBinaryExpr(token.type, expr, right, token.line)
+    }
+    return expr
+}
+
+private function relational(state: table) {
+    expr = additive(state)
+
+    while (check(state, tokenTypes.LESSER) || check(state, tokenTypes.LESSER_EQUAL) || check(state, tokenTypes.GREATER) || check(state, tokenTypes.GREATER_EQUAL)) {
+        token: table = advance(state)
+        right = additive(state)
+        expr = makeBinaryExpr(token.type, expr, right, token.line)
+    }
+    return expr
+}
+
+private function additive(state: table) {
+    expr = multiplicative(state)
+
+    while (check(state, tokenTypes.PLUS) || check(state, tokenTypes.MINUS) || check(state, tokenTypes.DOTDOT)) {
+        token: table = advance(state)
+        right = multiplicative(state)
+        expr = makeBinaryExpr(token.type, expr, right, token.line)
+    }
+    return expr
+}
+
+private function multiplicative(state: table) {
+    expr = unary(state)
+
+    while (check(state, tokenTypes.STAR) || check(state, tokenTypes.SLASH)) {
+        token: table = advance(state)
+        right = unary(state)
+        expr = makeBinaryExpr(token.type, expr, right, token.line)
+    }
+    return expr
+}
+
+private function unary(state: table) {
+    if (check(state, tokenTypes.OPPOSE) || check(state, tokenTypes.MINUS)) {
+        token: table = advance(state)
+        operand = unary(state)
+        return makeUnaryExpr(token.type, operand, token.line)
+    }
+    return primary(state)
+}
+
+private function assignment(state: table) {
+    expr = logicalOr(state)
+
+    if (check(state, tokenTypes.ASSIGN)) {
+        line: num = peek(state).line
+        move(state)
+        value = assignment(state)
+
+        if (expr.type == astTypes.IDENTIFIER_EXPR) {
+            name = expr.value
+            return makeAssignExpr(name, value, line)
+        }
+
+        if (expr.type == astTypes.INDEX_EXPR) {
+            return makeIndexAssignExpr(expr.target, expr.key, value, line)
+        }
+
+        print("Invalid assignment target line:" + line)
+    }
+
+    return expr
+}
+
+private function primaryBase(state: table): table {
+    if (check(state, tokenTypes.NUMBER)) {
+        token: table = consume(state, tokenTypes.NUMBER, "Unexpected type detected")
+        return makeNumberExpr(token.value, token.line)
+    }
+
+    if (check(state, tokenTypes.STRING)) {
+        token: table = consume(state, tokenTypes.STRING, "Unexpected type detected")
+        return makeStringExpr(token.value, token.line)
+    }
+
+    if (check(state, tokenTypes.IDENTIFIER)) {
+        token: table = consume(state, tokenTypes.IDENTIFIER, "Unexpected type detected")
+        return makeIdentifierExpr(token.value, token.line)
+    }
+
+    if (check(state, tokenTypes.LPAREN)) {
+        move(state)
+        valExpr = expression(state)
+        expect(state, tokenTypes.RPAREN, "expected ')' after expression")
+        return valExpr
+    }
+
+    if (check(state, tokenTypes.LBRACE)) {
+        token: table = consume(state, tokenTypes.LBRACE, "expected '{'")
+        fields: array = []
+        index: num = 0
+
+        if (!check(state, tokenTypes.RBRACE)) {
+            while (true) {
+                if (check(state, tokenTypes.IDENTIFIER)) {
+                    token = expect(state, tokenTypes.IDENTIFIER, "Expected field name")
+
+                    if (match(state, tokenTypes.ASSIGN)) {
+                        valExpr: table = expression(state)
+                        push(fields, {key = token.value, value = valExpr, fieldType = types.ANY})
+                    }
+                    elseif (match(state, tokenTypes.COLON)) {
+                        fType: num = parseTypeAnnotation(state)
+                        expect(state, tokenTypes.ASSIGN, "Expected '=' after field name")
+
+                        valExpr: table = expression(state)
+                        if (fType == types.ENUM) {
+                            if (valExpr.type ~= astTypes.TABLE_EXPR) {
+                                print("expected a table literal ('{...}') to initialize an enum on line " + valExpr.line)
+                            }
+                            valExpr = desugarEnumTable(valExpr)
+                        }
+                        push(fields, {key = token.value, value = valExpr, fieldType = fType})
+                    } else {
+                        valExpr = makeNumberExpr(index, token.line)
+                        push(fields, {key = token.value, value = valExpr, fieldType = types.NUMBER})
+                        index = index + 1
+                    }
+                } else {
+                    valExpr = expression(state)
+                    push(fields, {key = toString(index), value = valExpr, fieldType = types.ANY})
+
+                    index = index + 1
+                }
+
+                if (match(state, tokenTypes.COMMA)) {
+                } else {
+                    break
+                }
+            }
+        }
+        expect(state, tokenTypes.RBRACE, "expected '}' to close table literal")
+        return makeTableExpr(fields, token.line)
+    }
+
+    if (check(state, tokenTypes.LBRACKET)) {
+        token: table = consume(state, tokenTypes.LBRACKET, "expected '['")
+        elements: array = []
+
+        if (!check(state, tokenTypes.RBRACKET)) {
+            while (true) {
+                valExpr = expression(state)
+                push(elements, valExpr)
+
+                if (match(state, tokenTypes.COMMA)) {
+                } else {
+                    break
+                }
+            }
+        }
+        expect(state, tokenTypes.RBRACKET, "expected ']' to close array literal")
+        return makeArrayExpr(elements, token.line)
+    }
+
+    if (check(state, tokenTypes.TRUE)) {
+        token: table = consume(state, tokenTypes.TRUE, "expected boolean")
+        return makeBooleanExpr(true, token.line)
+    }
+
+    if (check(state, tokenTypes.FALSE)) {
+        token: table = consume(state, tokenTypes.FALSE, "expected boolean")
+        return makeBooleanExpr(false, token.line)
+    }
+
+    if (check(state, tokenTypes.NULL)) {
+        token: table = consume(state, tokenTypes.NULL, "")
+        return makeNullExpr(token.line)
+    }
+
+    print("Expected expression at line " + peek(state).line)
+}
+
+private function primary(state: table) {
+    valExpr = primaryBase(state)
+
+    while (true) {
+        if (check(state, tokenTypes.DOT)) {
+            dotToken: table = consume(state, tokenTypes.DOT, "expected property name after '.'")
+            nameToken: table = consume(state, tokenTypes.IDENTIFIER, "expected property name after '.'")
+            keyExpr = makeStringExpr(nameToken.value, nameToken.line)
+            valExpr = makeIndexExpr(valExpr, keyExpr, dotToken.line)
+        } elseif (check(state, tokenTypes.LBRACKET)) {
+            lbrToken: table = consume(state, tokenTypes.LBRACKET, "expected '['")
+            keyExpr = expression(state)
+            expect(state, tokenTypes.RBRACKET, "expected ']' after index expression")
+            valExpr = makeIndexExpr(valExpr, keyExpr, lbrToken.line)
+        } elseif (check(state, tokenTypes.LPAREN)) {
+            valExpr = finishCall(state, valExpr, peek(state).line)
+        } else {
+            break
+        }
+    }
+
+    return valExpr
+}
+
+private function finishCall(state: table, callee, line) {
+    expect(state, tokenTypes.LPAREN, "expected '(' to start call arguments")
+
+    arguments: array = []
+
+    if (!check(state, tokenTypes.RPAREN)) {
+        push(arguments, expression(state))
+        while (match(state, tokenTypes.COMMA)) {
+            push(arguments, expression(state))
+        }
+    }
+
+    expect(state, tokenTypes.RPAREN, "expected ')' after arguments")
+    return makeCallExpr(callee, arguments, line)
+}
+
+function testProgram(src: str) {
+    print("========================================")
+    print("Testing Program Source:")
+    print(src)
+    print("----------------------------------------")
+
+    -- 1. Lex the source code
+    lState = lexerState(src)
+    toks = tokenize(lState)
+
+    -- 2. Parse into statements
+    pState = parseState(toks)
+    stmts = parseProgram(pState)
+
+    print("Parsed statements count: " + length(stmts))
+
+    for i = 0, length(stmts) - 1 {
+        s = stmts[i]
+        print("[" + i + "] Statement Type: " + s.type + " | Line: " + s.line)
+
+        -- Inspect VarDeclare / Local
+        if (s.type == statementTypes.VARDECLARE_STATEMENT) {
+            print("    -> VarDecl: name='" + s.name + "' | typeAnno=" + s.typeAnnotation + " | isPrivate=" + s.isPrivate)
+        }
+
+        -- Inspect Functions
+        if (s.type == statementTypes.FUNCTION_STATEMENT) {
+            print("    -> Function: name='" + s.name + "' | params=" + length(s.parameters) + " | parent='" + s.parentName + "' | isPrivate=" + s.isPrivate)
+        }
+
+        -- Inspect If Statements
+        if (s.type == statementTypes.IF_STATEMENT) {
+            print("    -> If Statement: thenCount=" + length(s.thenBranch) + " | elseCount=" + length(s.elseBranch))
+        }
+
+        -- Inspect While Loops
+        if (s.type == statementTypes.WHILE_STATEMENT) {
+            print("    -> While Loop: bodyStatements=" + length(s.body))
+        }
+
+        -- Inspect For Loops
+        if (s.type == statementTypes.FOR_STATEMENT) {
+            print("    -> For Loop: isCStyle=" + s.isCStyle + " | bodyStatements=" + length(s.body))
+        }
+
+        -- Inspect Expression Statements
+        if (s.type == statementTypes.EXPRESSION_STATEMENT) {
+            print("    -> ExpressionStmt: exprType=" + s.expression.type)
+        }
+
+        -- Inspect Returns
+        if (s.type == statementTypes.RETURN_STATEMENT) {
+            hasVal = s.value != null
+            print("    -> ReturnStmt: hasValue=" + hasVal)
+        }
+    }
+    print("========================================\n")
+}
+
+-- 1. Test Variables (Typed, Local, Private)
+testProgram("x: num = 42\nlocal name = \"Borp\"\nprivate secret: num = 999")
+
+-- 2. Test Function (with types and inheritance)
+testProgram("function add(a: num, b: num): num {\n    return a + b\n}\n\nfn Player() -> Entity {\n}")
+
+-- 3. Test If-Else (Both block styles)
+testProgram("if x > 10 {\n    print(x)\n} else {\n    print(0)\n}\n\nif y == 5 then\n    return true\nend")
+
+-- 4. Test Loops (While, For C-style, For Range)
+testProgram("while true {\n    break\n}\n\nfor i = 0, 10, 1 {\n    print(i)\n}\n\nfor i = 0, i < 5, i = i + 1 {\n    print(i)\n}")
+
+-- 5. Test Assignments & Chaining
+testProgram("player.health = 100\nitems[0] = \"Sword\"\nresult = compute(1, 2)")
+
+testProgram("print('hello world')")

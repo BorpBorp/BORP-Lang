@@ -1,0 +1,307 @@
+types: enum = {
+    ANY,
+    NUMBER,
+    STRING,
+    BOOLEAN,
+    DOUBLE,
+    FLOAT,
+    TABLE,
+    ENUM,
+    ARRAY,
+    DOUBLE,
+    FLOAT,
+    INTEGER
+}
+
+astTypes: enum = {
+    NUMBER_EXPR,
+    STRING_EXPR,
+    BOOL_EXPR,
+    NULL_EXPR,
+    IDENTIFIER_EXPR,
+    TABLE_EXPR,
+    ARRAY_EXPR,
+    BINARY_EXPR,
+    UNARY_EXPR,
+    CALL_EXPR,
+    INDEX_EXPR,
+    ASSIGN_EXPR,
+    INDEX_ASSIGN_EXPR,
+    ENUM_EXPR
+}
+
+statementTypes: enum = {
+    IF_STATEMENT,
+    BLOCK_STATEMENT,
+    EXPRESSION_STATEMENT,
+    RETURN_STATEMENT,
+    FUNCTION_STATEMENT,
+    WHILE_STATEMENT,
+    FOR_STATEMENT,
+    VARDECLARE_STATEMENT,
+    BREAK_STATEMENT,
+    IMPORT_STATEMENT
+}
+
+function makeNumberExpr(val: num, ln: num): table {
+    numberExpr: table = {
+        type = astTypes.NUMBER_EXPR,
+        value: num = val,
+        line: num = ln
+    }
+    
+    return numberExpr
+}
+
+function makeStringExpr(val: str, ln: num): table {
+    stringExpr: table = {
+        type = astTypes.STRING_EXPR,
+        value: str = val,
+        line: num = ln
+    }
+
+    return stringExpr
+}
+
+function makeIdentifierExpr(val: str, ln: num): table {
+    identifierExpr: table = {
+        type = astTypes.IDENTIFIER_EXPR,
+        value: str = val,
+        line: num = ln
+    }
+
+    return identifierExpr
+}
+
+function makeBooleanExpr(val: bool, ln: num): table {
+    booleanExpr: table = {
+        type = astTypes.BOOL_EXPR,
+        value: bool = val,
+        line: num = ln
+    }
+
+    return booleanExpr
+}
+
+function makeNullExpr(ln: num): table {
+    nullExpr: table = {
+        type = astTypes.NULL_EXPR,
+        line: num = ln
+    }
+
+    return nullExpr
+}
+
+function makeEnumExpr(membs: array, ln: num): table {
+    enumExpression: table = {
+        type = astTypes.ENUM_EXPR,
+        members: array = membs,
+        line: num = ln
+    }
+
+    return enumExpression
+}
+
+function makeTableExpr(f: array, ln: num): table {
+    tableExpr: table = {
+        type = astTypes.TABLE_EXPR,
+        fields: array = f,
+        line: num = ln
+    }
+
+    return tableExpr
+}
+
+function makeArrayExpr(el: array, ln: num): table {
+    arrayExpr: table = {
+        type = astTypes.ARRAY_EXPR,
+        elements: array = el,
+        line: num = ln
+    }
+
+    return arrayExpr
+}
+
+function makeIndexExpr(tar: table, k: table, ln: num): table {
+    indexExpr: table = {
+        type = astTypes.INDEX_EXPR,
+        target: table = tar,
+        key: table = k,
+        line: num = ln
+    }
+
+    return indexExpr
+}
+
+function makeCallExpr(ce: table, args: array, ln: num): table {
+    callExpr: table = {
+        type = astTypes.CALL_EXPR,
+        callee: table = ce,
+        arguments: array = args,
+        line: num = ln
+    }
+
+    return callExpr
+}
+
+function makeUnaryExpr(tkType: num, op: table, ln: num): table {
+    unaryExpr: table = {
+        type = astTypes.UNARY_EXPR,
+        tokenType: num = tkType,
+        operand: table = op,
+        line: num = ln
+    }
+
+    return unaryExpr
+}
+
+function makeBinaryExpr(tkType: num, le: table, ri: table, ln: num): table {
+    binaryExpr: table = {
+        type = astTypes.BINARY_EXPR,
+        tokenType: num = tkType,
+        left: table = le,
+        right: table = ri,
+        line: num = ln
+    }
+
+    return binaryExpr
+}
+
+function makeAssignExpr(n: str, val: table, ln: num): table {
+    assignExpr: table = {
+        type = astTypes.ASSIGN_EXPR,
+        name: str = n,
+        value = val,
+        line: num = ln
+    }
+
+    return assignExpr
+}
+
+function makeIndexAssignExpr(t: table, k: table, val: table, ln: num): table {
+    indexAssignExpr: table = {
+        type = astTypes.INDEX_ASSIGN_EXPR,
+        target: table = t,
+        key: table = k,
+        value: table = val,
+        line: num = ln
+    }
+
+    return indexAssignExpr
+}
+
+function makeExpressionStatement(expr, ln: num): table {
+    expressionStatement: table = {
+        type = statementTypes.EXPRESSION_STATEMENT,
+        expression = expr,
+        line: num = ln
+    }
+
+    return expressionStatement
+}
+
+function makeBlockStatement(stmnts, ln: num): table {
+    blockStatement: table = {
+        type = statementTypes.BLOCK_STATEMENT,
+        statements = stmnts,
+        line: num = ln
+    }
+
+    return blockStatement
+}
+
+function makeIfStatement(cond: table, thenB, elseB, ln: num): table {
+    ifStatement: table = {
+        type = statementTypes.IF_STATEMENT,
+        condition: table = cond,
+        thenBranch = thenB,
+        elseBranch = elseB,
+        line: num = ln
+    }
+
+    return ifStatement
+}
+
+function makeVarDeclareStatement(na: str, init: table, typeAnno: num, isPriv: bool, ln: num): table {
+    varDeclareStatement: table = {
+        type = statementTypes.VARDECLARE_STATEMENT,
+        name: str = na,
+        initializer: table = init,
+        typeAnnotation: num = typeAnno,
+        isPrivate: bool = isPriv,
+        line: num = ln
+    }
+
+    return varDeclareStatement
+}
+
+function makeReturnStatement(val: table, ln: num): table {
+    returnStatement: table = {
+        type = statementTypes.RETURN_STATEMENT,
+        value: table = val,
+        line: num = ln
+    }
+
+    return returnStatement
+}
+
+function makeFunctionStatement(n: str, par: array, bo: array, pName: str, pArgs: array, rType: num, isLa: bool, isPriv: bool, ln: num): table {
+    functionStatement: table = {
+        type = statementTypes.FUNCTION_STATEMENT,
+        name: str = n,
+        parameters: array = par,
+        body: array = bo,
+        parentName: str = pName,
+        parentArgs: array = pArgs,
+        returnType: num = rType,
+        isLazy: bool = isLa,
+        isPrivate: bool = isPriv,
+        line: num = ln
+    }
+
+    return functionStatement
+}
+
+function makeForStatement(cl1: table, cl2: table, cl3, cStyle: bool, bo: array, ln: num): table {
+    forStatement: table = {
+        type = statementTypes.FOR_STATEMENT,
+        clause1: table = cl1,
+        clause2: table = cl2,
+        clause3 = cl3,
+        isCStyle: bool = cStyle,
+        body: array = bo,
+        line: num = ln
+    }
+
+    return forStatement
+}
+
+function makeWhileStatement(cond: table, bo: array, ln: num): table {
+    whileStatement: table = {
+        type = statementTypes.WHILE_STATEMENT,
+        condition: table = cond,
+        body: array = bo,
+        line: num = ln
+    }
+
+    return whileStatement
+}
+
+function makeBreakStatement(ln: num): table {
+    breakStatement: table = {
+        type = statementTypes.BREAK_STATEMENT,
+        line: num = ln
+    }
+
+    return breakStatement
+}
+
+function makeImportStatement(pa: str, ln: num): table {
+    importStatement: table = {
+        type = statementTypes.IMPORT_STATEMENT,
+        path: str = pa,
+        line: num = ln
+    }
+
+    return importStatement
+}

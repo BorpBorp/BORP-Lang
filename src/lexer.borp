@@ -1,0 +1,345 @@
+import "tokenTypes.borp"
+
+keywords: table = {}
+
+keywords["if"] = tokenTypes.IF
+keywords["then"] = tokenTypes.THEN
+keywords["else"] = tokenTypes.ELSE
+keywords["elseif"] = tokenTypes.ELSEIF
+keywords["end"] = tokenTypes.END
+keywords["and"] = tokenTypes.AND
+keywords["or"] = tokenTypes.OR
+keywords["fn"] = tokenTypes.FUNCTION
+keywords["function"] = tokenTypes.FUNCTION
+keywords["func"] = tokenTypes.FUNCTION
+keywords["return"] = tokenTypes.RETURN
+keywords["lazy"] = tokenTypes.LAZY
+keywords["while"] = tokenTypes.WHILE
+keywords["do"] = tokenTypes.DO
+keywords["break"] = tokenTypes.BREAK
+keywords["true"] = tokenTypes.TRUE
+keywords["false"] = tokenTypes.FALSE
+keywords["for"] = tokenTypes.FOR
+keywords["import"] = tokenTypes.IMPORT
+keywords["local"] = tokenTypes.LOCAL
+keywords["private"] = tokenTypes.PRIVATE
+keywords["not"] = tokenTypes.OPPOSE
+keywords["null"] = tokenTypes.NULL
+
+function lexerState(src) {
+    state: table = {
+        source: str = src,
+        cursor: num = 0,
+        line: num = 1
+    }
+
+    return state
+}
+
+private function containsChar(haystack: str, needle: str): bool {
+    if (length(needle) == 0) { return false }
+    
+    i: num = 0
+    while (i < length(haystack)) {
+        if (charAt(haystack, i) == needle) {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
+private function isAlpha(c: str): bool {
+    return containsChar("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", c)
+}
+
+private function isAlnum(c: str): bool {
+    return containsChar("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", c)
+}
+
+function isAtEnd(state: table): bool {
+    if (state.tokens != null) {
+        if (state.cursor >= length(state.tokens)) { return true }
+        return state.tokens[state.cursor].type == tokenTypes.END_OF_FILE
+    }
+    return state.cursor >= length(state.source)
+}
+
+function peek(state: table) {
+    if (isAtEnd(state)) {
+        if (state.tokens != null) {
+            return state.tokens[length(state.tokens) - 1]
+        }
+        return ""
+    }
+
+    if (state.tokens != null) {
+        return state.tokens[state.cursor]
+    }
+    return charAt(state.source, state.cursor)
+}
+
+function peekNext(state: table) {
+    if (state.tokens != null) {
+        if (state.cursor + 1 >= length(state.tokens)) {
+            return state.tokens[length(state.tokens) - 1]
+        }
+        return state.tokens[state.cursor + 1]
+    }
+
+    if (state.cursor + 1 >= length(state.source)) {
+        return ""
+    }
+    return charAt(state.source, state.cursor + 1)
+}
+
+function read(state: table): str {
+    if (isAtEnd(state)) {
+        return ""
+    }
+    return charAt(state.source, state.cursor)
+}
+
+function move(state: table) {
+    state.cursor = state.cursor + 1
+}
+
+private function makeToken(state, tokenType, val): table {
+    Token: table = {type = tokenType, value = val, line = state.line}
+    return Token
+}
+
+private function makeStringToken(state: table, quoteChar) {
+    string: str = ""
+
+    while (!isAtEnd(state) && peek(state) ~= quoteChar) {
+        c: str = read(state)
+        move(state)
+
+        if (c == "\n") {
+            state.line = state.line + 1
+            string = string + c
+        } elseif (c == "\\" && !isAtEnd(state)) {
+            esc: str = read(state)
+            move(state)
+
+            if (esc == '"') {
+                string = string + '"'
+            }
+            elseif (esc == '\'') {
+                string = string + '\''
+            }
+            elseif (esc == '\\') {
+                string = string + '\\'
+            }
+            elseif (esc == 'n') {
+                string = string + '\n'
+            }
+            elseif (esc == 't') {
+                string = string + '\t'
+            }
+            elseif (esc == 'r') {
+                string = string + '\r'
+            }
+            else {
+                string = string + '\\'
+            }
+        }
+        else {
+            string = string + c
+        }
+    }
+
+    if (!isAtEnd(state)) {
+        move(state)
+    }
+
+    return makeToken(state, tokenTypes.STRING, string)
+}
+
+private function makeNumberToken(state: table) {
+    numStr: str = ""
+
+    while (!isAtEnd(state) && isNumeric(peek(state))) {
+        numStr = numStr + peek(state)
+        move(state)
+    }
+    
+    return makeToken(state, tokenTypes.NUMBER, toNumber(numStr))
+}
+
+private function scanIdentifierOrKeyword(state) {
+    identStr: str = ""
+
+    while (!isAtEnd(state) && isAlnum(peek(state))) {
+        identStr = identStr + read(state)
+        move(state)
+    }
+
+    type = keywords[identStr]
+    if (type == null) {
+        type = tokenTypes.IDENTIFIER
+    }
+
+    return makeToken(state, type, identStr)
+}
+
+function tokenize(state) {
+    tokens = []
+
+    while (!isAtEnd(state)) {
+        c: str = peek(state)
+
+        if (c == '\n') {
+            state.line = state.line + 1
+            makeToken(state, tokenTypes.NEWLINE, '\n')
+            move(state)
+        }
+        elseif (c == ' ' || c == '\t' || c == '\r') {
+            move(state)
+        }
+        elseif (c == '.') {
+            move(state)
+
+            if (peek(state) == '.') {
+                move(state)
+                push(tokens, makeToken(state, tokenTypes.DOTDOT, '..'))
+            } else {
+                push(tokens, makeToken(state, tokenTypes.DOT, '.'))
+            }
+        }
+        elseif (isNumeric(c)) {
+            push(tokens, makeNumberToken(state))
+        }
+        elseif (isAlpha(c)) {
+            push(tokens, scanIdentifierOrKeyword(state))
+        }
+        elseif (c == '-' && peekNext(state) == '>') {
+            move(state)
+            move(state)
+            push(tokens, makeToken(state, tokenTypes.INHERIT, "->"))
+        }
+        elseif (c == '-' && peekNext(state) == '-') {
+            while (!isAtEnd(state) && peek(state) ~= '\n') {
+                move(state)
+            }
+        }
+        elseif (c == '/' && peekNext(state) == '/') {
+            while (!isAtEnd(state) && peek(state) ~= '\n') {
+                move(state)
+            }
+        }
+        elseif (c == '=') {
+            move(state)
+            if (peek(state) == '=') {
+                move(state)
+                push(tokens, makeToken(state, tokenTypes.EQUALS, '=='))
+            } else {
+                push(tokens, makeToken(state, tokenTypes.ASSIGN, '='))
+            }
+        }
+        elseif (c == '"' || c == '\'') {
+            move(state)
+            push(tokens, makeStringToken(state, c))
+        }
+        elseif (c == '!' || c == '~') {
+            firstChar: str = c
+            move(state)
+
+            if (peek(state) == '=') {
+                move(state)
+                push(tokens, makeToken(state, tokenTypes.NOT_EQUAL, firstChar + '='))
+            } else {
+                push(tokens, makeToken(state, tokenTypes.OPPOSE, '!'))
+            }
+        }
+        elseif (c == '<') {
+            move(state)
+            
+            if (peek(state) == '=') {
+                move(state)
+                push(tokens, makeToken(state, tokenTypes.LESSER_EQUAL, '<='))
+            } else {
+                push(tokens, makeToken(state, tokenTypes.LESSER, '<'))
+            }
+        }
+        elseif (c == '>') {
+            move(state)
+
+            if (peek(state) == '=') {
+                move(state)
+                push(tokens, makeToken(state, tokenTypes.GREATER_EQUAL, '>='))
+            } else {
+                push(tokens, makeToken(state, tokenTypes.GREATER, '>'))
+            }
+        }
+        elseif (c == '&') {
+            move(state)
+
+            if (peek(state) == '&') {
+                move(state)
+                push(tokens, makeToken(state, tokenTypes.AND, '&&'))
+            } else {
+                -- Leaving this empty because I haven't made a way to throw errors yet other than print() which isn't ideal
+            }
+        }
+        elseif (c == '|') {
+            move(state)
+
+            if (peek(state) == '|') {
+                move(state)
+                push(tokens, makeToken(state, tokenTypes.OR, '||'))
+            } else {
+                -- Leaving this empty because I haven't made a way to throw errors yet other than print() which isn't ideal
+            }
+        }
+        else {
+            move(state)
+
+            if (c == '{') {
+                push(tokens, makeToken(state, tokenTypes.LBRACE, '{'))
+            }
+            elseif (c == '}') {
+                push(tokens, makeToken(state, tokenTypes.RBRACE, '}'))
+            }
+            elseif (c == '(') {
+                push(tokens, makeToken(state, tokenTypes.LPAREN, '('))
+            }
+            elseif (c == ')') {
+                push(tokens, makeToken(state, tokenTypes.RPAREN, ')'))
+            }
+            elseif (c == ',') {
+                push(tokens, makeToken(state, tokenTypes.COMMA, ','))
+            }
+            elseif (c == '+') {
+                push(tokens, makeToken(state, tokenTypes.PLUS, '+'))
+            }
+            elseif (c == '-') {
+                push(tokens, makeToken(state, tokenTypes.MINUS, '-'))
+            }
+            elseif (c == ';') {
+                push(tokens, makeToken(state, tokenTypes.SEMICOLON, ';'))
+            }
+            elseif (c == '*') {
+                push(tokens, makeToken(state, tokenTypes.STAR, '*'))
+            }
+            elseif (c == '/') {
+                push(tokens, makeToken(state, tokenTypes.SLASH, '/'))
+            }
+            elseif (c == ':') {
+                push(tokens, makeToken(state, tokenTypes.COLON, ':'))
+            }
+            elseif (c == '[') {
+                push(tokens, makeToken(state, tokenTypes.LBRACKET, '['))
+            }
+            elseif (c == ']') {
+                push(tokens, makeToken(state, tokenTypes.RBRACKET, ']'))
+            } else {
+                // Same thing here, meant to throw an error but no way yet since we only have print() but not a priority
+            }
+        }
+    }
+
+    push(tokens, makeToken(state, tokenTypes.END_OF_FILE, 'EOF'))
+    return tokens
+}

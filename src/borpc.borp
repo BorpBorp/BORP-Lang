@@ -1,0 +1,218 @@
+import "ast.borp"
+import "tokentypes.borp"
+import "parser.borp"
+import "lexer.borp"
+
+private function provFunctions(fnName: str, args: str): str {
+    if (fnName == "print") {
+        return "printf(\"%g\\n\", " + args + ")"
+    }
+}
+
+private function genExpr(expr: table): str {
+    if (expr.type == astTypes.NUMBER_EXPR) {
+        return toString(expr.value)
+    }
+    if (expr.type == astTypes.STRING_EXPR) {
+        return '"' + expr.value + '"'
+    }
+    if (expr.type == astTypes.BOOL_EXPR) {
+        if (expr.value) {
+            return "true"
+        } else {
+            return "false"
+        }
+    }
+    if (expr.type == astTypes.NULL_EXPR) {
+        return "NULL"
+    }
+    if (expr.type == astTypes.IDENTIFIER_EXPR) {
+        return expr.value
+    }
+    if (expr.type == astTypes.ASSIGN_EXPR) {
+        return expr.name + " = " + genExpr(expr.value)
+    }
+    if (expr.type == astTypes.CALL_EXPR) {
+        args: str = ""
+        if (length(expr.arguments) > 0) {
+            for i = 0, length(expr.arguments) - 1 {
+                if (i < length(expr.arguments) - 1) {
+                    args = args + genExpr(expr.arguments[i]) + ", "
+                } else {
+                    args = args + genExpr(expr.arguments[i])
+                }
+            }
+        }
+        builtin = provFunctions(expr.callee.value, args)
+
+        if (builtin ~= null) {
+            return builtin
+        }
+
+        return genExpr(expr.callee) + "(" + args + ")"
+    }
+
+    if (expr.type == astTypes.UNARY_EXPR) {
+        if (expr.tokenType == tokenTypes.MINUS) {
+            return "(-" + genExpr(expr.operand) + ")"
+        } else {
+            return "(! " + genExpr(expr.operand) + ")"
+        }
+    }
+
+    if (expr.type == astTypes.BINARY_EXPR) {
+        operand: str = ""
+        if (expr.tokenType == tokenTypes.PLUS) {
+            operand = "+"
+        } elseif (expr.tokenType == tokenTypes.MINUS) {
+            operand = "-"
+        } elseif (expr.tokenType == tokenTypes.STAR) {
+            operand = "*"
+        } elseif (expr.tokenType == tokenTypes.SLASH) {
+            operand = "/"
+        } elseif (expr.tokenType == tokenTypes.EQUALS) {
+            operand = "=="
+        } elseif (expr.tokenType == tokenTypes.NOT_EQUAL) {
+            operand = "!="
+        } elseif (expr.tokenType == tokenTypes.GREATER_EQUAL) {
+            operand = ">="
+        } elseif (expr.tokenType == tokenTypes.LESSER_EQUAL) {
+            operand = "<="
+        } elseif (expr.tokenType == tokenTypes.LESSER) {
+            operand = "<"
+        } elseif (expr.tokenType == tokenTypes.GREATER) {
+            operand = ">"
+        } elseif (expr.tokenType == tokenTypes.AND) {
+            operand = "&&"
+        } elseif (expr.tokenType == tokenTypes.OR) {
+            operand = "||"
+        }
+
+        return "(" + genExpr(expr.left) + " " + operand + " " + genExpr(expr.right) + ")"
+    }
+}
+
+private function cType(typeAnno: num): str {
+    if (typeAnno == types.NUMBER) {
+        return "double"
+    } elseif (typeAnno == types.DOUBLE) {
+        return "double"
+    } elseif (typeAnno == types.FLOAT) {
+        return "float"
+    } elseif (typeAnno == types.INTEGER) {
+        return "int"
+    } elseif (typeAnno == types.STRING) {
+        return "const char*"
+    } elseif (typeAnno == types.BOOLEAN) {
+        return "bool"
+    }
+
+    return "void"
+}
+
+private function genFunction(statement: table): str {
+    retType: str = cType(statement.returnType)
+    params: str = ""
+    body: str = genStatementList(statement.body)
+
+    if (length(statement.parameters) == 0) {
+        params = ""
+    } else {
+        for i = 0, length(statement.parameters) - 1 {
+            p = statement.parameters[i]
+            if (i < length(statement.parameters) - 1) {
+                params = params + cType(p.type) + " " + p.name + ", "
+            } else {
+                params = params + cType(p.type) + " " + p.name
+            }
+        }
+    }
+
+    return retType + " " + statement.name + "(" + params + ") {\n" + body + "}\n"
+}
+
+private function genStatementList(statements: array): str {
+    out: str = ""
+
+    if (length(statements) == 0) {
+        return ""
+    }
+
+    for i = 0, length(statements) - 1 {
+        out = out + genStatement(statements[i])
+    }
+
+    return out
+}
+
+private function genStatement(statement: table): str {
+    if (statement.type == statementTypes.EXPRESSION_STATEMENT) {
+        return genExpr(statement.expression) + ";\n"
+    }
+    if (statement.type == statementTypes.VARDECLARE_STATEMENT) {
+        typeStr = cType(statement.typeAnnotation)
+        return typeStr + " " + statement.name + " = " + genExpr(statement.initializer) + ";\n"
+    }
+    if (statement.type == statementTypes.RETURN_STATEMENT) {
+        if (statement.value ~= null) {
+            return "return " + genExpr(statement.value) + ";\n"
+        } else {
+            return "return;\n"
+        }
+    }
+    if (statement.type == statementTypes.BREAK_STATEMENT) {
+        return "break;\n"
+    }
+    if (statement.type == statementTypes.BLOCK_STATEMENT) {
+        return "{\n " + genStatementList(statement.statements) + "}\n"
+    }
+    if (statement.type == statementTypes.WHILE_STATEMENT) {
+        return "while (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.body) + "}\n"
+    }
+    if (statement.type == statementTypes.IF_STATEMENT) {
+        if (length(statement.elseBranch) > 0) {
+            return "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "} else {\n" + genStatementList(statement.elseBranch) + "}\n"
+        } else {
+            return "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "}\n"
+        }
+    }
+}
+
+function generateProgram(statements: array): str {
+    functionsCode: str = ""
+    mainCode: str = ""
+
+    for i = 0, length(statements) - 1 {
+        stmt = statements[i]
+        if (stmt.type == statementTypes.FUNCTION_STATEMENT) {
+            functionsCode = functionsCode + genFunction(stmt) + "\n"
+        } else {
+            mainCode = mainCode + genStatement(stmt)
+        }
+    }
+
+    out: str = "#include <stdio.h>\n#include <stdbool.h>\n\n"
+    out = out + functionsCode
+    out = out + "int main(int argc, char** argv) {\n"
+    out = out + mainCode
+    out = out + "    return 0;\n"
+    out = out + "}\n"
+
+    return out
+}
+
+function testCompiler(source: str) {
+    source = readFile("tests/test.borp")
+
+    // 2. Lex & Parse
+    tokens = tokenize(lexerState(source))
+    ast = parseProgram(parseState(tokens))
+
+    // 3. Generate C code
+    cCode = generateProgram(ast)
+
+    // 4. Save the .c file
+    writeFile("tests/math_test.c", cCode)
+}
+
+testCompiler("x: num = 10\ny: num = 20\ntotal: num = (x + y) * 2\nif total > 50 {\n    total = total - 5\n} else {\n    total = total + 5\n}\nwhile total > 0 {\n    total = total - 1\n}")
