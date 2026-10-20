@@ -130,6 +130,10 @@ private function genFunction(statement: table): str {
         }
     }
 
+    if (statement.returnType == types.ANY) {
+        retType = "void"
+    }
+
     return retType + " " + statement.name + "(" + params + ") {\n" + body + "}\n"
 }
 
@@ -156,15 +160,15 @@ private function genStatement(statement: table): str {
 
         if (statement.initializer.type == astTypes.ENUM_EXPR) {
             enumMembers: str = ""
-            for i = 0, length(statement.initializer) - 1 {
+            for i = 0, length(statement.initializer.members) - 1 {
                 member: table = statement.initializer.members[i]
                 if (i < length(statement.initializer.members) - 1) {
-                    enumMembers = enumMembers + member.name + ",\n"
+                    enumMembers = enumMembers + member.name + " = " + member.value + ",\n"
                 } else {
-                    enumMembers = enumMembers + member.name
+                    enumMembers = enumMembers + member.name + " = " + member.value
                 }
             }
-            return typeStr + " " + statement.name + " {\n" + enumMembers +  "};\n"
+            return typeStr + " {\n" + enumMembers +  "};\n"
         }
 
         return typeStr + " " + statement.name + " = " + genExpr(statement.initializer) + ";\n"
@@ -187,7 +191,18 @@ private function genStatement(statement: table): str {
     }
     if (statement.type == statementTypes.IF_STATEMENT) {
         if (length(statement.elseBranch) > 0) {
-            return "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "} else {\n" + genStatementList(statement.elseBranch) + "}\n"
+            out: str = "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "}"
+
+            if (length(statement.elseBranch) == 0) {
+                out = out + "\n"
+                return out
+            } elseif (length(statement.elseBranch) == 1 && statement.elseBranch[0].type == statementTypes.IF_STATEMENT) {
+                out = out + "else " + genStatement(statement.elseBranch[0])
+                return out
+            } else {
+                out = out + " else {\n" + genStatementList(statement.elseBranch) + "}\n"
+                return out
+            }
         } else {
             return "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "}\n"
         }

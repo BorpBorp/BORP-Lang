@@ -302,6 +302,24 @@ private function forStatement(state: table) {
     return makeForStatement(clause1, clause2, clause3, isCStyle, body, line)
 }
 
+private function hasReturnStatement(body: array): bool {
+    for i = 0, length(body) - 1 {
+        if (body[i].type == statementTypes.RETURN_STATEMENT) {
+            return true
+        } elseif (body[i].type == statementTypes.IF_STATEMENT) {
+            if (length(body[i].elseBranch) > 0 && hasReturnStatement(body[i].elseBranch) && hasReturnStatement(body[i].thenBranch)) {
+                return true
+            }
+        } elseif (body[i].type == statementTypes.BLOCK_STATEMENT) {
+            if (hasReturnStatement(body[i].statements)) {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
 private function functionStatement(state: table, isPrivate: bool) {
     line: num = advance(state).line
     nameToken = expect(state, tokenTypes.IDENTIFIER, "expected function name")
@@ -351,6 +369,11 @@ private function functionStatement(state: table, isPrivate: bool) {
 
     if (isPrivate == null) {
         isPrivate = false
+    }
+
+    if (returnType ~= types.ANY && !hasReturnStatement(body)) {
+        print("Parser Error on line " + line + ": Function '" + nameToken.value + "' declared return type but has no return statement.")
+        returnType = types.ANY
     }
 
     return makeFunctionStatement(nameToken.value, params, body, parentName, parentArgs, returnType, isLazy, isPrivate, line)
