@@ -2,29 +2,29 @@ import "tokenTypes.borp"
 
 keywords: table = {}
 
-keywords["if"] = tokenTypes.IF
-keywords["then"] = tokenTypes.THEN
-keywords["else"] = tokenTypes.ELSE
-keywords["elseif"] = tokenTypes.ELSEIF
-keywords["end"] = tokenTypes.END
-keywords["and"] = tokenTypes.AND
-keywords["or"] = tokenTypes.OR
-keywords["fn"] = tokenTypes.FUNCTION
-keywords["function"] = tokenTypes.FUNCTION
-keywords["func"] = tokenTypes.FUNCTION
-keywords["return"] = tokenTypes.RETURN
-keywords["lazy"] = tokenTypes.LAZY
-keywords["while"] = tokenTypes.WHILE
-keywords["do"] = tokenTypes.DO
-keywords["break"] = tokenTypes.BREAK
-keywords["true"] = tokenTypes.TRUE
-keywords["false"] = tokenTypes.FALSE
-keywords["for"] = tokenTypes.FOR
-keywords["import"] = tokenTypes.IMPORT
-keywords["local"] = tokenTypes.LOCAL
-keywords["private"] = tokenTypes.PRIVATE
-keywords["not"] = tokenTypes.OPPOSE
-keywords["null"] = tokenTypes.NULL
+keywords["if"] = tokenTypes.TOKEN_IF
+keywords["then"] = tokenTypes.TOKEN_THEN
+keywords["else"] = tokenTypes.TOKEN_ELSE
+keywords["elseif"] = tokenTypes.TOKEN_ELSEIF
+keywords["end"] = tokenTypes.TOKEN_END
+keywords["and"] = tokenTypes.TOKEN_AND
+keywords["or"] = tokenTypes.TOKEN_OR
+keywords["fn"] = tokenTypes.TOKEN_FUNCTION
+keywords["function"] = tokenTypes.TOKEN_FUNCTION
+keywords["func"] = tokenTypes.TOKEN_FUNCTION
+keywords["return"] = tokenTypes.TOKEN_RETURN
+keywords["lazy"] = tokenTypes.TOKEN_LAZY
+keywords["while"] = tokenTypes.TOKEN_WHILE
+keywords["do"] = tokenTypes.TOKEN_DO
+keywords["break"] = tokenTypes.TOKEN_BREAK
+keywords["true"] = tokenTypes.TOKEN_TRUE
+keywords["false"] = tokenTypes.TOKEN_FALSE
+keywords["for"] = tokenTypes.TOKEN_FOR
+keywords["import"] = tokenTypes.TOKEN_IMPORT
+keywords["local"] = tokenTypes.TOKEN_LOCAL
+keywords["private"] = tokenTypes.TOKEN_PRIVATE
+keywords["not"] = tokenTypes.TOKEN_OPPOSE
+keywords["null"] = tokenTypes.TOKEN_NULL
 
 function lexerState(src) {
     state: table = {
@@ -60,7 +60,7 @@ private function isAlnum(c: str): bool {
 function isAtEnd(state: table): bool {
     if (state.tokens != null) {
         if (state.cursor >= length(state.tokens)) { return true }
-        return state.tokens[state.cursor].type == tokenTypes.END_OF_FILE
+        return state.tokens[state.cursor].type == tokenTypes.TOKEN_END_OF_FILE
     }
     return state.cursor >= length(state.source)
 }
@@ -154,7 +154,7 @@ private function makeStringToken(state: table, quoteChar) {
         move(state)
     }
 
-    return makeToken(state, tokenTypes.STRING, string)
+    return makeToken(state, tokenTypes.TOKEN_STRING, string)
 }
 
 private function makeNumberToken(state: table) {
@@ -165,7 +165,7 @@ private function makeNumberToken(state: table) {
         move(state)
     }
     
-    return makeToken(state, tokenTypes.NUMBER, toNumber(numStr))
+    return makeToken(state, tokenTypes.TOKEN_NUMBER, toNumber(numStr))
 }
 
 private function scanIdentifierOrKeyword(state) {
@@ -178,7 +178,7 @@ private function scanIdentifierOrKeyword(state) {
 
     type = keywords[identStr]
     if (type == null) {
-        type = tokenTypes.IDENTIFIER
+        type = tokenTypes.TOKEN_IDENTIFIER
     }
 
     return makeToken(state, type, identStr)
@@ -192,7 +192,7 @@ function tokenize(state) {
 
         if (c == '\n') {
             state.line = state.line + 1
-            makeToken(state, tokenTypes.NEWLINE, '\n')
+            makeToken(state, tokenTypes.TOKEN_NEWLINE, '\n')
             move(state)
         }
         elseif (c == ' ' || c == '\t' || c == '\r') {
@@ -203,9 +203,9 @@ function tokenize(state) {
 
             if (peek(state) == '.') {
                 move(state)
-                push(tokens, makeToken(state, tokenTypes.DOTDOT, '..'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_DOTDOT, '..'))
             } else {
-                push(tokens, makeToken(state, tokenTypes.DOT, '.'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_DOT, '.'))
             }
         }
         elseif (isNumeric(c)) {
@@ -217,7 +217,7 @@ function tokenize(state) {
         elseif (c == '-' && peekNext(state) == '>') {
             move(state)
             move(state)
-            push(tokens, makeToken(state, tokenTypes.INHERIT, "->"))
+            push(tokens, makeToken(state, tokenTypes.TOKEN_INHERIT, "->"))
         }
         elseif (c == '-' && peekNext(state) == '-') {
             while (!isAtEnd(state) && peek(state) ~= '\n') {
@@ -233,9 +233,9 @@ function tokenize(state) {
             move(state)
             if (peek(state) == '=') {
                 move(state)
-                push(tokens, makeToken(state, tokenTypes.EQUALS, '=='))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_EQUALS, '=='))
             } else {
-                push(tokens, makeToken(state, tokenTypes.ASSIGN, '='))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_ASSIGN, '='))
             }
         }
         elseif (c == '"' || c == '\'') {
@@ -248,9 +248,9 @@ function tokenize(state) {
 
             if (peek(state) == '=') {
                 move(state)
-                push(tokens, makeToken(state, tokenTypes.NOT_EQUAL, firstChar + '='))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_NOT_EQUAL, firstChar + '='))
             } else {
-                push(tokens, makeToken(state, tokenTypes.OPPOSE, '!'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_OPPOSE, '!'))
             }
         }
         elseif (c == '<') {
@@ -258,9 +258,9 @@ function tokenize(state) {
             
             if (peek(state) == '=') {
                 move(state)
-                push(tokens, makeToken(state, tokenTypes.LESSER_EQUAL, '<='))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_LESSER_EQUAL, '<='))
             } else {
-                push(tokens, makeToken(state, tokenTypes.LESSER, '<'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_LESSER, '<'))
             }
         }
         elseif (c == '>') {
@@ -268,9 +268,9 @@ function tokenize(state) {
 
             if (peek(state) == '=') {
                 move(state)
-                push(tokens, makeToken(state, tokenTypes.GREATER_EQUAL, '>='))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_GREATER_EQUAL, '>='))
             } else {
-                push(tokens, makeToken(state, tokenTypes.GREATER, '>'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_GREATER, '>'))
             }
         }
         elseif (c == '&') {
@@ -278,7 +278,7 @@ function tokenize(state) {
 
             if (peek(state) == '&') {
                 move(state)
-                push(tokens, makeToken(state, tokenTypes.AND, '&&'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_AND, '&&'))
             } else {
                 -- Leaving this empty because I haven't made a way to throw errors yet other than print() which isn't ideal
             }
@@ -288,7 +288,7 @@ function tokenize(state) {
 
             if (peek(state) == '|') {
                 move(state)
-                push(tokens, makeToken(state, tokenTypes.OR, '||'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_OR, '||'))
             } else {
                 -- Leaving this empty because I haven't made a way to throw errors yet other than print() which isn't ideal
             }
@@ -297,49 +297,49 @@ function tokenize(state) {
             move(state)
 
             if (c == '{') {
-                push(tokens, makeToken(state, tokenTypes.LBRACE, '{'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_LBRACE, '{'))
             }
             elseif (c == '}') {
-                push(tokens, makeToken(state, tokenTypes.RBRACE, '}'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_RBRACE, '}'))
             }
             elseif (c == '(') {
-                push(tokens, makeToken(state, tokenTypes.LPAREN, '('))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_LPAREN, '('))
             }
             elseif (c == ')') {
-                push(tokens, makeToken(state, tokenTypes.RPAREN, ')'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_RPAREN, ')'))
             }
             elseif (c == ',') {
-                push(tokens, makeToken(state, tokenTypes.COMMA, ','))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_COMMA, ','))
             }
             elseif (c == '+') {
-                push(tokens, makeToken(state, tokenTypes.PLUS, '+'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_PLUS, '+'))
             }
             elseif (c == '-') {
-                push(tokens, makeToken(state, tokenTypes.MINUS, '-'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_MINUS, '-'))
             }
             elseif (c == ';') {
-                push(tokens, makeToken(state, tokenTypes.SEMICOLON, ';'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_SEMICOLON, ';'))
             }
             elseif (c == '*') {
-                push(tokens, makeToken(state, tokenTypes.STAR, '*'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_STAR, '*'))
             }
             elseif (c == '/') {
-                push(tokens, makeToken(state, tokenTypes.SLASH, '/'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_SLASH, '/'))
             }
             elseif (c == ':') {
-                push(tokens, makeToken(state, tokenTypes.COLON, ':'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_COLON, ':'))
             }
             elseif (c == '[') {
-                push(tokens, makeToken(state, tokenTypes.LBRACKET, '['))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_LBRACKET, '['))
             }
             elseif (c == ']') {
-                push(tokens, makeToken(state, tokenTypes.RBRACKET, ']'))
+                push(tokens, makeToken(state, tokenTypes.TOKEN_RBRACKET, ']'))
             } else {
                 // Same thing here, meant to throw an error but no way yet since we only have print() but not a priority
             }
         }
     }
 
-    push(tokens, makeToken(state, tokenTypes.END_OF_FILE, 'EOF'))
+    push(tokens, makeToken(state, tokenTypes.TOKEN_END_OF_FILE, 'EOF'))
     return tokens
 }

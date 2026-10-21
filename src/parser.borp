@@ -1,6 +1,6 @@
 import "lexer.borp"
 import "ast.borp"
-import "tokentypes.borp"
+import "tokenTypes.borp"
 
 function parseState(tokens: array) {
     state: table = {
@@ -15,7 +15,7 @@ function parseProgram(state) {
     statements: array = []
 
     while (!isAtEnd(state)) {
-        while (check(state, tokenTypes.NEWLINE)) {
+        while (check(state, tokenTypes.TOKEN_NEWLINE)) {
             advance(state)
         }
         if (isAtEnd(state)) {
@@ -86,7 +86,7 @@ private function expression(state: table) {
 }
 
 private function parseTypeAnnotation(state: table): num {
-    tokenType: table = expect(state, tokenTypes.IDENTIFIER, "expected type name")
+    tokenType: table = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected type name")
 
     if (tokenType.value == "number" || tokenType.value == "num") { return types.NUMBER }
     if (tokenType.value == "integer" || tokenType.value == "int") { return types.INTEGER }
@@ -140,14 +140,14 @@ private function statementList(state: table, tokens: array) {
 }
 
 private function statement(state: table) {
-    if (check(state, tokenTypes.PRIVATE)) {
+    if (check(state, tokenTypes.TOKEN_PRIVATE)) {
         privToken = advance(state)
         isPrivate: bool = true
         inner: table = {}
 
-        if (check(state, tokenTypes.FUNCTION)) {
+        if (check(state, tokenTypes.TOKEN_FUNCTION)) {
             inner = functionStatement(state, isPrivate)
-        } elseif (check(state, tokenTypes.IDENTIFIER) && peekNext(state).type == tokenTypes.COLON) {
+        } elseif (check(state, tokenTypes.TOKEN_IDENTIFIER) && peekNext(state).type == tokenTypes.TOKEN_COLON) {
             inner = varDeclareStatement(state, isPrivate)
         } else {
             print("'private' can only be used to modify a function or a typed variable declaration line: " + privToken.line)
@@ -158,36 +158,36 @@ private function statement(state: table) {
 
     isPrivate: bool = false
 
-    if (check(state, tokenTypes.IMPORT)) {
+    if (check(state, tokenTypes.TOKEN_IMPORT)) {
         return importStatement(state)
     }
-    if (check(state, tokenTypes.LOCAL)) {
+    if (check(state, tokenTypes.TOKEN_LOCAL)) {
         return localStatement(state, true) // Should always be private so we pass it true without storing it previously (magic bool)
     }
 
-    if (check(state, tokenTypes.IDENTIFIER) && peekNext(state).type == tokenTypes.COLON) {
+    if (check(state, tokenTypes.TOKEN_IDENTIFIER) && peekNext(state).type == tokenTypes.TOKEN_COLON) {
         return varDeclareStatement(state, isPrivate)
     }
 
-    if (check(state, tokenTypes.WHILE)) {
+    if (check(state, tokenTypes.TOKEN_WHILE)) {
         return whileStatement(state)
     }
-    if (check(state, tokenTypes.IF)) {
+    if (check(state, tokenTypes.TOKEN_IF)) {
         return ifStatement(state)
     }
-    if (check(state, tokenTypes.LBRACE)) {
+    if (check(state, tokenTypes.TOKEN_LBRACE)) {
         return blockStatement(state)
     }
-    if (check(state, tokenTypes.FUNCTION)) {
+    if (check(state, tokenTypes.TOKEN_FUNCTION)) {
         return functionStatement(state, isPrivate)
     }
-    if (check(state, tokenTypes.RETURN)) {
+    if (check(state, tokenTypes.TOKEN_RETURN)) {
         return returnStatement(state)
     }
-    if (check(state, tokenTypes.BREAK)) {
+    if (check(state, tokenTypes.TOKEN_BREAK)) {
         return breakStatement(state)
     }
-    if (check(state, tokenTypes.FOR)) {
+    if (check(state, tokenTypes.TOKEN_FOR)) {
         return forStatement(state)
     }
 
@@ -197,10 +197,10 @@ private function statement(state: table) {
 private function importStatement(state: table) {
     line: num = advance(state).line
 
-    pathToken = expect(state, tokenTypes.STRING, "expected string path after 'import'")
+    pathToken = expect(state, tokenTypes.TOKEN_STRING, "expected string path after 'import'")
     path: str = pathToken.value
 
-    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+    matchMulti(state, [tokenTypes.TOKEN_SEMICOLON, tokenTypes.TOKEN_NEWLINE])
 
     return makeImportStatement(path, line)
 }
@@ -208,15 +208,15 @@ private function importStatement(state: table) {
 private function localStatement(state: table, isPrivate: bool) {
     line: num = advance(state).line
 
-    nameToken = expect(state, tokenTypes.IDENTIFIER, "expected a variable name after 'local'")
+    nameToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected a variable name after 'local'")
     name: str = nameToken.value
 
     declaredType = types.ANY
-    if (match(state, tokenTypes.COLON)) {
+    if (match(state, tokenTypes.TOKEN_COLON)) {
         declaredType = parseTypeAnnotation(state)
     }
 
-    expect(state, tokenTypes.ASSIGN, "expected '=' after variable name in 'local' declaration")
+    expect(state, tokenTypes.TOKEN_ASSIGN, "expected '=' after variable name in 'local' declaration")
     initializer = expression(state)
 
     if (declaredType == types.ENUM) {
@@ -226,7 +226,7 @@ private function localStatement(state: table, isPrivate: bool) {
         initializer = desugarEnumTable(initializer)
     }
 
-    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+    matchMulti(state, [tokenTypes.TOKEN_SEMICOLON, tokenTypes.TOKEN_NEWLINE])
 
     if (isPrivate == null) {
         isPrivate = true
@@ -238,7 +238,7 @@ private function localStatement(state: table, isPrivate: bool) {
 private function breakStatement(state: table) {
     line: num = advance(state).line
 
-    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+    matchMulti(state, [tokenTypes.TOKEN_SEMICOLON, tokenTypes.TOKEN_NEWLINE])
 
     return makeBreakStatement(line)
 }
@@ -251,14 +251,14 @@ private function whileStatement(state: table) {
 
     body: array = []
 
-    if (check(state, tokenTypes.LBRACE)) {
+    if (check(state, tokenTypes.TOKEN_LBRACE)) {
         move(state)
-        body = statementList(state, [tokenTypes.RBRACE])
-        expect(state, tokenTypes.RBRACE, "expected '}' to close while body")
+        body = statementList(state, [tokenTypes.TOKEN_RBRACE])
+        expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close while body")
     } else {
-        match(state, tokenTypes.DO)
-        body = statementList(state, [tokenTypes.END])
-        expect(state, tokenTypes.END, "expected 'end' to close while loop")
+        match(state, tokenTypes.TOKEN_DO)
+        body = statementList(state, [tokenTypes.TOKEN_END])
+        expect(state, tokenTypes.TOKEN_END, "expected 'end' to close while loop")
     }
 
     return makeWhileStatement(condition, body, line)
@@ -268,14 +268,14 @@ private function forStatement(state: table) {
     line: num = advance(state).line
 
     clause1 = expression(state)
-    expect(state, tokenTypes.COMMA, "expected ',' after first for-loop clause")
+    expect(state, tokenTypes.TOKEN_COMMA, "expected ',' after first for-loop clause")
 
     clause2 = expression(state)
     
     isCStyle = false
     if (clause2.type == astTypes.BINARY_EXPR) {
         op = clause2.tokenType
-        if (op == tokenTypes.LESSER || op == tokenTypes.LESSER_EQUAL || op == tokenTypes.GREATER || op == tokenTypes.GREATER_EQUAL || op == tokenTypes.EQUALS || op == tokenTypes.NOT_EQUAL) {
+        if (op == tokenTypes.TOKEN_LESSER || op == tokenTypes.TOKEN_LESSER_EQUAL || op == tokenTypes.TOKEN_GREATER || op == tokenTypes.TOKEN_GREATER_EQUAL || op == tokenTypes.TOKEN_EQUALS || op == tokenTypes.TOKEN_NOT_EQUAL) {
             isCStyle = true
         }
     }
@@ -283,20 +283,20 @@ private function forStatement(state: table) {
     clause3 = null
 
     if (isCStyle) {
-        expect(state, tokenTypes.COMMA, "expected ',' before for-loop increment")
+        expect(state, tokenTypes.TOKEN_COMMA, "expected ',' before for-loop increment")
         clause3 = expression(state)
-    } elseif (match(state, tokenTypes.COMMA)) {
+    } elseif (match(state, tokenTypes.TOKEN_COMMA)) {
         clause3 = expression(state)
     }
 
     body: array = []
-    if (match(state, tokenTypes.LBRACE)) {
-        body = statementList(state, [tokenTypes.RBRACE])
-        expect(state, tokenTypes.RBRACE, "expected '}' to close for-loop body")
+    if (match(state, tokenTypes.TOKEN_LBRACE)) {
+        body = statementList(state, [tokenTypes.TOKEN_RBRACE])
+        expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close for-loop body")
     } else {
-        match(state, tokenTypes.DO)
-        body = statementList(state, [tokenTypes.END])
-        expect(state, tokenTypes.END, "expected 'end' to close for-loop")
+        match(state, tokenTypes.TOKEN_DO)
+        body = statementList(state, [tokenTypes.TOKEN_END])
+        expect(state, tokenTypes.TOKEN_END, "expected 'end' to close for-loop")
     }
 
     return makeForStatement(clause1, clause2, clause3, isCStyle, body, line)
@@ -322,29 +322,29 @@ private function hasReturnStatement(body: array): bool {
 
 private function functionStatement(state: table, isPrivate: bool) {
     line: num = advance(state).line
-    nameToken = expect(state, tokenTypes.IDENTIFIER, "expected function name")
+    nameToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected function name")
 
-    expect(state, tokenTypes.LPAREN, "expected '(' after function name")
+    expect(state, tokenTypes.TOKEN_LPAREN, "expected '(' after function name")
     params: array = []
-    if (!check(state, tokenTypes.RPAREN)) {
+    if (!check(state, tokenTypes.TOKEN_RPAREN)) {
         while (true) {
-            param = expect(state, tokenTypes.IDENTIFIER, "expected parameter name")
+            param = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected parameter name")
             paramType = types.ANY
 
-            if (match(state, tokenTypes.COLON)) {
+            if (match(state, tokenTypes.TOKEN_COLON)) {
                 paramType = parseTypeAnnotation(state)
             }
             push(params, {name = param.value, type = paramType})
 
-            if (!match(state, tokenTypes.COMMA)) {
+            if (!match(state, tokenTypes.TOKEN_COMMA)) {
                 break
             }
         }
     }
-    expect(state, tokenTypes.RPAREN, "expected ')' after parameters")
+    expect(state, tokenTypes.TOKEN_RPAREN, "expected ')' after parameters")
 
     returnType = types.ANY
-    if (match(state, tokenTypes.COLON)) {
+    if (match(state, tokenTypes.TOKEN_COLON)) {
         returnType = parseTypeAnnotation(state)
     }
 
@@ -352,19 +352,19 @@ private function functionStatement(state: table, isPrivate: bool) {
     parentArgs: array = []
     isLazy: bool = false
 
-    if (match(state, tokenTypes.INHERIT)) {
-        isLazy = match(state, tokenTypes.LAZY) != null
-        pToken = expect(state, tokenTypes.IDENTIFIER, "expected parent function name after '->'")
+    if (match(state, tokenTypes.TOKEN_INHERIT)) {
+        isLazy = match(state, tokenTypes.TOKEN_LAZY) != null
+        pToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected parent function name after '->'")
         parentName = pToken.value
     }
 
     body: array = []
-    if (match(state, tokenTypes.LBRACE)) {
-        body = statementList(state, [tokenTypes.RBRACE])
-        expect(state, tokenTypes.RBRACE, "expected '}' to close function body")
+    if (match(state, tokenTypes.TOKEN_LBRACE)) {
+        body = statementList(state, [tokenTypes.TOKEN_RBRACE])
+        expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close function body")
     } else {
-        body = statementList(state, [tokenTypes.END])
-        expect(state, tokenTypes.END, "expected 'end' to close function body")
+        body = statementList(state, [tokenTypes.TOKEN_END])
+        expect(state, tokenTypes.TOKEN_END, "expected 'end' to close function body")
     }
 
     if (isPrivate == null) {
@@ -384,11 +384,11 @@ private function returnStatement(state: table) {
 
     value = null
 
-    if (!check(state, tokenTypes.SEMICOLON) && !check(state, tokenTypes.END) && !check(state, tokenTypes.RBRACE) && !check(state, tokenTypes.NEWLINE)) {
+    if (!check(state, tokenTypes.TOKEN_SEMICOLON) && !check(state, tokenTypes.TOKEN_END) && !check(state, tokenTypes.TOKEN_RBRACE) && !check(state, tokenTypes.TOKEN_NEWLINE)) {
         value = expression(state)
     }
 
-    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+    matchMulti(state, [tokenTypes.TOKEN_SEMICOLON, tokenTypes.TOKEN_NEWLINE])
 
     return makeReturnStatement(value, line)
 }
@@ -402,8 +402,8 @@ private function varDeclareStatement(state: table, isPrivate: bool) {
     declaredType = parseTypeAnnotation(state)
 
     if (declaredType ~= types.ENUM) {
-        expect(state, tokenTypes.ASSIGN, "expected '=' after type annotation")
-    } elseif (check(state, tokenTypes.ASSIGN)) {
+        expect(state, tokenTypes.TOKEN_ASSIGN, "expected '=' after type annotation")
+    } elseif (check(state, tokenTypes.TOKEN_ASSIGN)) {
         move(state)
     }
 
@@ -416,7 +416,7 @@ private function varDeclareStatement(state: table, isPrivate: bool) {
         initializer = desugarEnumTable(initializer)
     }
 
-    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+    matchMulti(state, [tokenTypes.TOKEN_SEMICOLON, tokenTypes.TOKEN_NEWLINE])
 
     if (isPrivate == null) {
         isPrivate = false
@@ -433,30 +433,30 @@ private function ifStatement(state: table) {
     thenBranch: array = []
     elseBranch: array = []
 
-    if (check(state, tokenTypes.LBRACE)) {
+    if (check(state, tokenTypes.TOKEN_LBRACE)) {
         move(state)
 
-        thenBranch = statementList(state, [tokenTypes.RBRACE])
-        expect(state, tokenTypes.RBRACE, "expected '}' to close body")
+        thenBranch = statementList(state, [tokenTypes.TOKEN_RBRACE])
+        expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close body")
 
-        if (check(state, tokenTypes.ELSEIF)) {
+        if (check(state, tokenTypes.TOKEN_ELSEIF)) {
             push(elseBranch, ifStatement(state))
-        } elseif (match(state, tokenTypes.ELSE)) {
-            expect(state, tokenTypes.LBRACE, "expected '{' to open else body")
-            elseBranch = statementList(state, [tokenTypes.RBRACE])
-            expect(state, tokenTypes.RBRACE, "expected '}' to close else body")
+        } elseif (match(state, tokenTypes.TOKEN_ELSE)) {
+            expect(state, tokenTypes.TOKEN_LBRACE, "expected '{' to open else body")
+            elseBranch = statementList(state, [tokenTypes.TOKEN_RBRACE])
+            expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close else body")
         }
     } else {
-        expect(state, tokenTypes.THEN, "expected 'then' or '{' after condition")
-        thenBranch = statementList(state, [tokenTypes.ELSEIF, tokenTypes.ELSE, tokenTypes.END])
+        expect(state, tokenTypes.TOKEN_THEN, "expected 'then' or '{' after condition")
+        thenBranch = statementList(state, [tokenTypes.TOKEN_ELSEIF, tokenTypes.TOKEN_ELSE, tokenTypes.TOKEN_END])
 
-        if (check(state, tokenTypes.ELSEIF)) {
+        if (check(state, tokenTypes.TOKEN_ELSEIF)) {
             push(elseBranch, ifStatement(state))
-        } elseif (match(state, tokenTypes.ELSE)) {
-            elseBranch = statementList(state, [tokenTypes.END])
-            expect(state, tokenTypes.END, "expected 'end' to close if statement")
+        } elseif (match(state, tokenTypes.TOKEN_ELSE)) {
+            elseBranch = statementList(state, [tokenTypes.TOKEN_END])
+            expect(state, tokenTypes.TOKEN_END, "expected 'end' to close if statement")
         } else {
-            expect(state, tokenTypes.END, "expected 'end' to close if statement")
+            expect(state, tokenTypes.TOKEN_END, "expected 'end' to close if statement")
         }
     }
 
@@ -466,9 +466,9 @@ private function ifStatement(state: table) {
 private function blockStatement(state: table) {
     line: num = peek(state).line
     move(state)
-    statements = statementList(state, [tokenTypes.RBRACE]) // Not made yet so can't test this line specifically
+    statements = statementList(state, [tokenTypes.TOKEN_RBRACE]) // Not made yet so can't test this line specifically
 
-    expect(state, tokenTypes.RBRACE, "expected '}' to close block")
+    expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close block")
     return makeBlockStatement(statements, line)
 }
 
@@ -476,14 +476,14 @@ private function expressionStatement(state: table) {
     line: num = peek(state).line
     expr = expression(state)
 
-    matchMulti(state, [tokenTypes.SEMICOLON, tokenTypes.NEWLINE])
+    matchMulti(state, [tokenTypes.TOKEN_SEMICOLON, tokenTypes.TOKEN_NEWLINE])
     return makeExpressionStatement(expr, line)
 }
 
 private function logicalAnd(state: table) {
     expr = equality(state)
 
-    while (check(state, tokenTypes.AND)) {
+    while (check(state, tokenTypes.TOKEN_AND)) {
         token: table = advance(state)
         right = equality(state)
         expr = makeBinaryExpr(token.type, expr, right, token.line)
@@ -494,7 +494,7 @@ private function logicalAnd(state: table) {
 private function logicalOr(state: table) {
     expr = logicalAnd(state)
 
-    while (check(state, tokenTypes.OR)) {
+    while (check(state, tokenTypes.TOKEN_OR)) {
         token: table = advance(state)
         right = logicalAnd(state)
         expr = makeBinaryExpr(token.type, expr, right, token.line)
@@ -505,7 +505,7 @@ private function logicalOr(state: table) {
 private function equality(state: table) {
     expr = relational(state)
 
-    while (check(state, tokenTypes.EQUALS) || check(state, tokenTypes.NOT_EQUAL)) {
+    while (check(state, tokenTypes.TOKEN_EQUALS) || check(state, tokenTypes.TOKEN_NOT_EQUAL)) {
         token: table = advance(state)
         right = relational(state)
         expr = makeBinaryExpr(token.type, expr, right, token.line)
@@ -516,7 +516,7 @@ private function equality(state: table) {
 private function relational(state: table) {
     expr = additive(state)
 
-    while (check(state, tokenTypes.LESSER) || check(state, tokenTypes.LESSER_EQUAL) || check(state, tokenTypes.GREATER) || check(state, tokenTypes.GREATER_EQUAL)) {
+    while (check(state, tokenTypes.TOKEN_LESSER) || check(state, tokenTypes.TOKEN_LESSER_EQUAL) || check(state, tokenTypes.TOKEN_GREATER) || check(state, tokenTypes.TOKEN_GREATER_EQUAL)) {
         token: table = advance(state)
         right = additive(state)
         expr = makeBinaryExpr(token.type, expr, right, token.line)
@@ -527,7 +527,7 @@ private function relational(state: table) {
 private function additive(state: table) {
     expr = multiplicative(state)
 
-    while (check(state, tokenTypes.PLUS) || check(state, tokenTypes.MINUS) || check(state, tokenTypes.DOTDOT)) {
+    while (check(state, tokenTypes.TOKEN_PLUS) || check(state, tokenTypes.TOKEN_MINUS) || check(state, tokenTypes.TOKEN_DOTDOT)) {
         token: table = advance(state)
         right = multiplicative(state)
         expr = makeBinaryExpr(token.type, expr, right, token.line)
@@ -538,7 +538,7 @@ private function additive(state: table) {
 private function multiplicative(state: table) {
     expr = unary(state)
 
-    while (check(state, tokenTypes.STAR) || check(state, tokenTypes.SLASH)) {
+    while (check(state, tokenTypes.TOKEN_STAR) || check(state, tokenTypes.TOKEN_SLASH)) {
         token: table = advance(state)
         right = unary(state)
         expr = makeBinaryExpr(token.type, expr, right, token.line)
@@ -547,7 +547,7 @@ private function multiplicative(state: table) {
 }
 
 private function unary(state: table) {
-    if (check(state, tokenTypes.OPPOSE) || check(state, tokenTypes.MINUS)) {
+    if (check(state, tokenTypes.TOKEN_OPPOSE) || check(state, tokenTypes.TOKEN_MINUS)) {
         token: table = advance(state)
         operand = unary(state)
         return makeUnaryExpr(token.type, operand, token.line)
@@ -558,7 +558,7 @@ private function unary(state: table) {
 private function assignment(state: table) {
     expr = logicalOr(state)
 
-    if (check(state, tokenTypes.ASSIGN)) {
+    if (check(state, tokenTypes.TOKEN_ASSIGN)) {
         line: num = peek(state).line
         move(state)
         value = assignment(state)
@@ -579,45 +579,45 @@ private function assignment(state: table) {
 }
 
 private function primaryBase(state: table) {
-    if (check(state, tokenTypes.NUMBER)) {
-        token: table = consume(state, tokenTypes.NUMBER, "Unexpected type detected")
+    if (check(state, tokenTypes.TOKEN_NUMBER)) {
+        token: table = consume(state, tokenTypes.TOKEN_NUMBER, "Unexpected type detected")
         return makeNumberExpr(token.value, token.line)
     }
 
-    if (check(state, tokenTypes.STRING)) {
-        token: table = consume(state, tokenTypes.STRING, "Unexpected type detected")
+    if (check(state, tokenTypes.TOKEN_STRING)) {
+        token: table = consume(state, tokenTypes.TOKEN_STRING, "Unexpected type detected")
         return makeStringExpr(token.value, token.line)
     }
 
-    if (check(state, tokenTypes.IDENTIFIER)) {
-        token: table = consume(state, tokenTypes.IDENTIFIER, "Unexpected type detected")
+    if (check(state, tokenTypes.TOKEN_IDENTIFIER)) {
+        token: table = consume(state, tokenTypes.TOKEN_IDENTIFIER, "Unexpected type detected")
         return makeIdentifierExpr(token.value, token.line)
     }
 
-    if (check(state, tokenTypes.LPAREN)) {
+    if (check(state, tokenTypes.TOKEN_LPAREN)) {
         move(state)
         valExpr = expression(state)
-        expect(state, tokenTypes.RPAREN, "expected ')' after expression")
+        expect(state, tokenTypes.TOKEN_RPAREN, "expected ')' after expression")
         return valExpr
     }
 
-    if (check(state, tokenTypes.LBRACE)) {
-        token: table = consume(state, tokenTypes.LBRACE, "expected '{'")
+    if (check(state, tokenTypes.TOKEN_LBRACE)) {
+        token: table = consume(state, tokenTypes.TOKEN_LBRACE, "expected '{'")
         fields: array = []
         index: num = 0
 
-        if (!check(state, tokenTypes.RBRACE)) {
+        if (!check(state, tokenTypes.TOKEN_RBRACE)) {
             while (true) {
-                if (check(state, tokenTypes.IDENTIFIER)) {
-                    token = expect(state, tokenTypes.IDENTIFIER, "Expected field name")
+                if (check(state, tokenTypes.TOKEN_IDENTIFIER)) {
+                    token = expect(state, tokenTypes.TOKEN_IDENTIFIER, "Expected field name")
 
-                    if (match(state, tokenTypes.ASSIGN)) {
+                    if (match(state, tokenTypes.TOKEN_ASSIGN)) {
                         valExpr: table = expression(state)
                         push(fields, {key = token.value, value = valExpr, fieldType = types.ANY})
                     }
-                    elseif (match(state, tokenTypes.COLON)) {
+                    elseif (match(state, tokenTypes.TOKEN_COLON)) {
                         fType: num = parseTypeAnnotation(state)
-                        expect(state, tokenTypes.ASSIGN, "Expected '=' after field name")
+                        expect(state, tokenTypes.TOKEN_ASSIGN, "Expected '=' after field name")
 
                         valExpr: table = expression(state)
                         if (fType == types.ENUM) {
@@ -639,47 +639,47 @@ private function primaryBase(state: table) {
                     index = index + 1
                 }
 
-                if (match(state, tokenTypes.COMMA)) {
+                if (match(state, tokenTypes.TOKEN_COMMA)) {
                 } else {
                     break
                 }
             }
         }
-        expect(state, tokenTypes.RBRACE, "expected '}' to close table literal")
+        expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close table literal")
         return makeTableExpr(fields, token.line)
     }
 
-    if (check(state, tokenTypes.LBRACKET)) {
-        token: table = consume(state, tokenTypes.LBRACKET, "expected '['")
+    if (check(state, tokenTypes.TOKEN_LBRACKET)) {
+        token: table = consume(state, tokenTypes.TOKEN_LBRACKET, "expected '['")
         elements: array = []
 
-        if (!check(state, tokenTypes.RBRACKET)) {
+        if (!check(state, tokenTypes.TOKEN_RBRACKET)) {
             while (true) {
                 valExpr = expression(state)
                 push(elements, valExpr)
 
-                if (match(state, tokenTypes.COMMA)) {
+                if (match(state, tokenTypes.TOKEN_COMMA)) {
                 } else {
                     break
                 }
             }
         }
-        expect(state, tokenTypes.RBRACKET, "expected ']' to close array literal")
+        expect(state, tokenTypes.TOKEN_RBRACKET, "expected ']' to close array literal")
         return makeArrayExpr(elements, token.line)
     }
 
-    if (check(state, tokenTypes.TRUE)) {
-        token: table = consume(state, tokenTypes.TRUE, "expected boolean")
+    if (check(state, tokenTypes.TOKEN_TRUE)) {
+        token: table = consume(state, tokenTypes.TOKEN_TRUE, "expected boolean")
         return makeBooleanExpr(true, token.line)
     }
 
-    if (check(state, tokenTypes.FALSE)) {
-        token: table = consume(state, tokenTypes.FALSE, "expected boolean")
+    if (check(state, tokenTypes.TOKEN_FALSE)) {
+        token: table = consume(state, tokenTypes.TOKEN_FALSE, "expected boolean")
         return makeBooleanExpr(false, token.line)
     }
 
-    if (check(state, tokenTypes.NULL)) {
-        token: table = consume(state, tokenTypes.NULL, "")
+    if (check(state, tokenTypes.TOKEN_NULL)) {
+        token: table = consume(state, tokenTypes.TOKEN_NULL, "")
         return makeNullExpr(token.line)
     }
 
@@ -690,17 +690,17 @@ private function primary(state: table) {
     valExpr = primaryBase(state)
 
     while (true) {
-        if (check(state, tokenTypes.DOT)) {
-            dotToken: table = consume(state, tokenTypes.DOT, "expected property name after '.'")
-            nameToken: table = consume(state, tokenTypes.IDENTIFIER, "expected property name after '.'")
+        if (check(state, tokenTypes.TOKEN_DOT)) {
+            dotToken: table = consume(state, tokenTypes.TOKEN_DOT, "expected property name after '.'")
+            nameToken: table = consume(state, tokenTypes.TOKEN_IDENTIFIER, "expected property name after '.'")
             keyExpr = makeStringExpr(nameToken.value, nameToken.line)
             valExpr = makeIndexExpr(valExpr, keyExpr, dotToken.line)
-        } elseif (check(state, tokenTypes.LBRACKET)) {
-            lbrToken: table = consume(state, tokenTypes.LBRACKET, "expected '['")
+        } elseif (check(state, tokenTypes.TOKEN_LBRACKET)) {
+            lbrToken: table = consume(state, tokenTypes.TOKEN_LBRACKET, "expected '['")
             keyExpr = expression(state)
-            expect(state, tokenTypes.RBRACKET, "expected ']' after index expression")
+            expect(state, tokenTypes.TOKEN_RBRACKET, "expected ']' after index expression")
             valExpr = makeIndexExpr(valExpr, keyExpr, lbrToken.line)
-        } elseif (check(state, tokenTypes.LPAREN)) {
+        } elseif (check(state, tokenTypes.TOKEN_LPAREN)) {
             valExpr = finishCall(state, valExpr, peek(state).line)
         } else {
             break
@@ -711,18 +711,18 @@ private function primary(state: table) {
 }
 
 private function finishCall(state: table, callee, line) {
-    expect(state, tokenTypes.LPAREN, "expected '(' to start call arguments")
+    expect(state, tokenTypes.TOKEN_LPAREN, "expected '(' to start call arguments")
 
     arguments: array = []
 
-    if (!check(state, tokenTypes.RPAREN)) {
+    if (!check(state, tokenTypes.TOKEN_RPAREN)) {
         push(arguments, expression(state))
-        while (match(state, tokenTypes.COMMA)) {
+        while (match(state, tokenTypes.TOKEN_COMMA)) {
             push(arguments, expression(state))
         }
     }
 
-    expect(state, tokenTypes.RPAREN, "expected ')' after arguments")
+    expect(state, tokenTypes.TOKEN_RPAREN, "expected ')' after arguments")
     return makeCallExpr(callee, arguments, line)
 }
 

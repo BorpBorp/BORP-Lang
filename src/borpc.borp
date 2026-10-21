@@ -1,5 +1,5 @@
 import "ast.borp"
-import "tokentypes.borp"
+import "tokenTypes.borp"
 import "parser.borp"
 import "lexer.borp"
 
@@ -132,7 +132,7 @@ private function genExpr(expr: table): str {
     }
 
     if (expr.type == astTypes.UNARY_EXPR) {
-        if (expr.tokenType == tokenTypes.MINUS) {
+        if (expr.tokenType == tokenTypes.TOKEN_MINUS) {
             return "(-" + genExpr(expr.operand) + ")"
         } else {
             return "(! " + genExpr(expr.operand) + ")"
@@ -141,29 +141,29 @@ private function genExpr(expr: table): str {
 
     if (expr.type == astTypes.BINARY_EXPR) {
         operand: str = ""
-        if (expr.tokenType == tokenTypes.PLUS) {
+        if (expr.tokenType == tokenTypes.TOKEN_PLUS) {
             operand = "+"
-        } elseif (expr.tokenType == tokenTypes.MINUS) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_MINUS) {
             operand = "-"
-        } elseif (expr.tokenType == tokenTypes.STAR) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_STAR) {
             operand = "*"
-        } elseif (expr.tokenType == tokenTypes.SLASH) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_SLASH) {
             operand = "/"
-        } elseif (expr.tokenType == tokenTypes.EQUALS) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_EQUALS) {
             operand = "=="
-        } elseif (expr.tokenType == tokenTypes.NOT_EQUAL) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
             operand = "!="
-        } elseif (expr.tokenType == tokenTypes.GREATER_EQUAL) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_GREATER_EQUAL) {
             operand = ">="
-        } elseif (expr.tokenType == tokenTypes.LESSER_EQUAL) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_LESSER_EQUAL) {
             operand = "<="
-        } elseif (expr.tokenType == tokenTypes.LESSER) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_LESSER) {
             operand = "<"
-        } elseif (expr.tokenType == tokenTypes.GREATER) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_GREATER) {
             operand = ">"
-        } elseif (expr.tokenType == tokenTypes.AND) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_AND) {
             operand = "&&"
-        } elseif (expr.tokenType == tokenTypes.OR) {
+        } elseif (expr.tokenType == tokenTypes.TOKEN_OR) {
             operand = "||"
         }
 
@@ -190,6 +190,8 @@ private function cType(typeAnno: num): str {
         return "BorpArray*"
     } elseif (typeAnno == types.TABLE) {
         return "BorpTable*"
+    } elseif (typeAnno == types.ANY) {
+        return "BorpValue*"
     }
 
     return "void"
@@ -199,6 +201,7 @@ private function genFunction(statement: table): str {
     retType: str = cType(statement.returnType)
     params: str = ""
     body: str = genStatementList(statement.body)
+    locals: array = []
 
     if (length(statement.parameters) == 0) {
         params = ""
@@ -244,6 +247,24 @@ private function genStatement(statement: table): str {
     }
     if (statement.type == statementTypes.VARDECLARE_STATEMENT) {
         typeStr = cType(statement.typeAnnotation)
+
+        if (statement.typeAnnotation == types.ANY || typeStr == "void") {
+            initType = statement.initializer.type
+
+            if (initType == astTypes.NUMBER_EXPR) {
+                typeStr = "double"
+            } elseif (initType == astTypes.STRING_EXPR) {
+                typeStr = "const char*"
+            } elseif (initType == astTypes.BOOL_EXPR) {
+                typeStr = "bool"
+            } elseif (initType == astTypes.ARRAY_EXPR) {
+                typeStr = "BorpArray*"
+            } elseif (initType == astTypes.TABLE_EXPR) {
+                typeStr = "BorpTable*"
+            } else {
+                typeStr = "double"
+            }
+        }
 
         if (statement.initializer.type == astTypes.ENUM_EXPR) {
             enumMembers: str = ""
@@ -384,7 +405,7 @@ function generateProgram(statements: array): str {
 }
 
 function testCompiler(source: str) {
-    source = readFile("src/test.borp")
+    source = readFile("src/lexer.borp")
 
     // 2. Lex & Parse
     tokens = tokenize(lexerState(source))
@@ -394,7 +415,7 @@ function testCompiler(source: str) {
     cCode = generateProgram(ast)
 
     // 4. Save the .c file
-    writeFile("math_test.c", cCode)
+    writeFile("lexer.c", cCode)
 }
 
 testCompiler("x: num = 10\ny: num = 20\ntotal: num = (x + y) * 2\nif total > 50 {\n    total = total - 5\n} else {\n    total = total + 5\n}\nwhile total > 0 {\n    total = total - 1\n}")
