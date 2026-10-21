@@ -8,7 +8,7 @@ private function provFunctions(fnName: str, args: str): str {
         return "printf(\"%g\\n\", " + args + ")"
     }
     if (fnName == "length") {
-        return "(double)(" + args + "->length)"
+        return "borp_length(" + args + ")"
     }
     if (fnName == "push") {
         return "borp_array_push(" + args + ")"
@@ -79,7 +79,7 @@ private function genExpr(expr: table): str {
         value: str = genExpr(expr.value)
 
         if (expr.key.type == astTypes.STRING_EXPR) {
-            return "borp_table_set(targetStr, keyStr, " + boxExpr(expr.value) + ")"
+            return "borp_table_set(" + target + ", " + key + ", " + boxExpr(expr.value) + ")"
         }
 
         return "borp_array_set(" + target + ", (int)(" + key + "), " + value + ")"
@@ -230,14 +230,13 @@ private function genFunction(statement: table): str {
 private function genStatementList(statements: array): str {
     out: str = ""
 
-    if (length(statements) == 0) {
-        return ""
-    }
-
     for i = 0, length(statements) - 1 {
-        out = out + genStatement(statements[i])
+        stmtCode = genStatement(statements[i])
+        if (stmtCode != null) {
+            out = out + stmtCode
+        }
     }
-
+    
     return out
 }
 
@@ -246,7 +245,8 @@ private function genStatement(statement: table): str {
         return genExpr(statement.expression) + ";\n"
     }
     if (statement.type == statementTypes.VARDECLARE_STATEMENT) {
-        typeStr = cType(statement.typeAnnotation)
+        typeStr: str = cType(statement.typeAnnotation)
+        privStr: str = ""
 
         if (statement.typeAnnotation == types.ANY || typeStr == "void") {
             initType = statement.initializer.type
@@ -279,7 +279,11 @@ private function genStatement(statement: table): str {
             return typeStr + " {\n" + enumMembers +  "};\n"
         }
 
-        return typeStr + " " + statement.name + " = " + genExpr(statement.initializer) + ";\n"
+        if (statement.initializer.isPrivate) {
+            privStr = "static "
+        }
+
+        return privStr + typeStr + " " + statement.name + " = " + genExpr(statement.initializer) + ";\n"
     }
     if (statement.type == statementTypes.RETURN_STATEMENT) {
         if (statement.value ~= null) {
@@ -333,89 +337,7 @@ private function genStatement(statement: table): str {
             return "for (double " + varName + " = " + startVal + "; " + varName + " <= " + stopVal + "; " + varName + " += " + stepVal + ") {\n" + genStatementList(statement.body) + "}\n"
         }
     }
-}
-
-private function generateArrayStruct(): str {
-    return "typedef struct BorpArray {\n double* data;\nint length;\nint capacity;\n} BorpArray;\n\n"
-}
-
-private function generateTableStructAndTagged(): str {
-    enums: str = "typedef enum {\nVAL_NULL,\nVAL_NUMBER,\nVAL_BOOL,\nVAL_STRING,\nVAL_ARRAY,\nVAL_TABLE\n} BorpValueType;\n\n"
-    struct: str = "typedef struct BorpValue {\n BorpValueType type;\n union {\nint integer;\ndouble number;\nfloat floatInt;\nbool boolean;\n const char* string;\n struct BorpArray* array;\n struct BorpTable* table;} as;} BorpValue;\n\n"
-    entryStruct: str = "typedef struct {\n const char* key; BorpValue value;} BorpTableEntry;\n\n"
-    tableStruct: str = "typedef struct {\n BorpTableEntry* entries;\n int count;\n int capacity;} BorpTable;\n\n"
-
-    out: str = enums + struct + entryStruct + tableStruct
-    return out
-}
-
-private function generateArrayMethods(): str {
-    out: str = ""
-    out = out + "BorpArray* borp_array_create(int capacity) {\nBorpArray* borparray = malloc(sizeof(BorpArray));\nif (capacity < 4) {capacity = 4;}\nborparray->capacity = capacity;\nborparray->data = malloc(sizeof(double) * capacity);\nborparray->length = 0;\nreturn borparray;\n}\n\n"
-    out = out + "BorpArray* borp_array_push(BorpArray* arr, double val) {\n if (arr->length >= arr->capacity) {\narr->capacity = arr->capacity * 2;\narr->data = realloc(arr->data, sizeof(double) * arr->capacity);\n}\narr->data[arr->length] = val;\n arr->length++; return arr;\n}\n\n"
-    out = out + "double borp_array_get(BorpArray* arr, int index) {\nreturn arr->data[index];\n}\n\n"
-    out = out + "void borp_array_set(BorpArray* arr, int index, double val) {\narr->data[index] = val;\n}\n\n"
-    out = out + "BorpArray* borp_array_from_elements(int count, double elements[]) {\nBorpArray* arr = borp_array_create(count);\n for (int i = 0; i < count; i++) {\nborp_array_push(arr, elements[i]);}\n return arr;\n}\n\n"
-    out = out + "double borp_array_pop(BorpArray* arr) {\ndouble val = arr->data[arr->length - 1];\narr->length--;\nreturn val;\n}\n\n"
-
-    return out
-}
-
-private function generateTableMethods(): str {
-    out: str = ""
-    out = out + "BorpTable* borp_table_create(int capacity) {\nBorpTable* table = malloc(sizeof(BorpTable));\nif (capacity < 8) {capacity = 8;}\ntable->count = 0;\ntable->capacity = capacity;\ntable->entries = malloc(sizeof(BorpTableEntry) * capacity);\nfor (int i = 0; i < table->capacity; i++) {\ntable->entries[i].key = NULL;} return table;\n}\n\n"
-    out = out + "void borp_table_set(BorpTable* table, const char* key, BorpValue val) {\nuint32_t hash = borp_hash_string(key);\nint index = hash % table->capacity;\n while (true) {\nif (table->entries[index].key == NULL) {\ntable->entries[index].key = key;\ntable->entries[index].value = val;\ntable->count++;\n return;\n}\n else if (strcmp(table->entries[index].key, key) == 0) {\ntable->entries[index].value = val; return;\n}\n else {\nindex = (index + 1) % table->capacity;}\n}\n\n}\n\n"
-    out = out + "BorpValue borp_table_get(BorpTable* table, const char* key) {\nuint32_t hash = borp_hash_string(key);\n int index = hash % table->capacity;\nwhile (true) {\nif (table->entries[index].key == NULL) {\nreturn (BorpValue){.type = VAL_NULL};\n}\nelse if (strcmp(table->entries[index].key, key) == 0) {\nreturn table->entries[index].value;\n}\nelse {\nindex = (index + 1) % table->capacity;\n}\n}\n}\n\n"
-    out = out + "BorpValue borp_val_num(double n) {\nBorpValue v;\nv.type = VAL_NUMBER;\nv.as.number = n;\nreturn v;\n}\n\n"
-    out = out + "BorpValue borp_val_string(const char* s) {\nBorpValue v;\nv.type = VAL_STRING;\nv.as.string = s;\nreturn v;\n}\n\n"
-    out = out + "BorpValue borp_val_boolean(bool b) {\nBorpValue v;\nv.type = VAL_BOOL;\nv.as.boolean = b;\nreturn v;\n}\n\n"
-    out = out + "BorpValue borp_val_table(BorpTable* t){\nBorpValue v;\nv.type = VAL_TABLE;\nv.as.table = t;\nreturn v;\n}\n\n"
-    out = out + "BorpTable* borp_table_from_entries(int count, const char* keys[], BorpValue values[]) {\nBorpTable* table = borp_table_create(count * 2);\nfor (int i = 0; i < count; i++) {\nborp_table_set(table, keys[i], values[i]);\n}\nreturn table;\n}\n\n"
-
-    return out
-}
-
-function generateProgram(statements: array): str {
-    functionsCode: str = ""
-    mainCode: str = ""
-
-    for i = 0, length(statements) - 1 {
-        stmt = statements[i]
-        if (stmt.type == statementTypes.FUNCTION_STATEMENT) {
-            functionsCode = functionsCode + genFunction(stmt) + "\n"
-        } else {
-            mainCode = mainCode + genStatement(stmt)
-        }
+    if (statement.type == statementTypes.IMPORT_STATEMENT) {
+        return ""
     }
-
-    out: str = "#include <stdio.h>\n#include <stdbool.h>\n#include <stdlib.h>\n#include <stdint.h>\n\n"
-    out = out + "static unsigned int borp_hash_string(const char* key) {\nunsigned int hash = 2166136261u;\n for (int i = 0; key[i] != '\0'; i++) {\nhash ^= (unsigned char)key[i];\n hash *= 16777619u;};\n return hash;}"
-    out = out + "struct BorpTable;\n\n"
-    out = out + generateArrayStruct()
-    out = out + generateArrayMethods()
-    out = out + generateTableStructAndTagged()
-    out = out +  generateTableMethods()
-    out = out + functionsCode
-    out = out + "int main(int argc, char** argv) {\n"
-    out = out + mainCode
-    out = out + "    return 0;\n"
-    out = out + "}\n"
-
-    return out
 }
-
-function testCompiler(source: str) {
-    source = readFile("src/lexer.borp")
-
-    // 2. Lex & Parse
-    tokens = tokenize(lexerState(source))
-    ast = parseProgram(parseState(tokens))
-
-    // 3. Generate C code
-    cCode = generateProgram(ast)
-
-    // 4. Save the .c file
-    writeFile("lexer.c", cCode)
-}
-
-testCompiler("x: num = 10\ny: num = 20\ntotal: num = (x + y) * 2\nif total > 50 {\n    total = total - 5\n} else {\n    total = total + 5\n}\nwhile total > 0 {\n    total = total - 1\n}")
