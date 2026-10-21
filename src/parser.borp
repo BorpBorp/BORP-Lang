@@ -578,7 +578,7 @@ private function assignment(state: table) {
     return expr
 }
 
-private function primaryBase(state: table): table {
+private function primaryBase(state: table) {
     if (check(state, tokenTypes.NUMBER)) {
         token: table = consume(state, tokenTypes.NUMBER, "Unexpected type detected")
         return makeNumberExpr(token.value, token.line)
