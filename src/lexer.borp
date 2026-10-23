@@ -26,7 +26,7 @@ keywords["private"] = tokenTypes.TOKEN_PRIVATE
 keywords["not"] = tokenTypes.TOKEN_OPPOSE
 keywords["null"] = tokenTypes.TOKEN_NULL
 
-function lexerState(src): table {
+function lexerState(src: str): table {
     state: table = {
         source: str = src,
         cursor: num = 0,
@@ -105,12 +105,12 @@ function move(state: table) {
     state.cursor = state.cursor + 1
 }
 
-private function makeToken(state, tokenType, val): table {
+private function makeToken(state: table, tokenType, val): table {
     Token: table = {type = tokenType, value = val, line = state.line}
     return Token
 }
 
-private function makeStringToken(state: table, quoteChar): table {
+private function makeStringToken(state: table, quoteChar: str): table {
     string: str = ""
 
     while (!isAtEnd(state) && peek(state) ~= quoteChar) {

@@ -376,7 +376,12 @@ private function functionStatement(state: table, isPrivate: bool) {
         returnType = types.ANY
     }
 
-    return makeFunctionStatement(nameToken.value, params, body, parentName, parentArgs, returnType, isLazy, isPrivate, line)
+    hasReturn: bool = false
+    if (hasReturnStatement(body)) {
+        hasReturn = true
+    }
+
+    return makeFunctionStatement(nameToken.value, params, body, parentName, parentArgs, hasReturn, returnType, isLazy, isPrivate, line)
 }
 
 private function returnStatement(state: table) {

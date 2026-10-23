@@ -245,7 +245,7 @@ function makeReturnStatement(val: table, ln: num): table {
     return returnStatement
 }
 
-function makeFunctionStatement(n: str, par: array, bo: array, pName: str, pArgs: array, rType: num, isLa: bool, isPriv: bool, ln: num): table {
+function makeFunctionStatement(n: str, par: array, bo: array, pName: str, pArgs: array, hReturn: bool, rType: num, isLa: bool, isPriv: bool, ln: num): table {
     functionStatement: table = {
         type = statementTypes.FUNCTION_STATEMENT,
         name: str = n,
@@ -253,6 +253,7 @@ function makeFunctionStatement(n: str, par: array, bo: array, pName: str, pArgs:
         body: array = bo,
         parentName: str = pName,
         parentArgs: array = pArgs,
+        hasReturn: bool = hReturn,
         returnType: num = rType,
         isLazy: bool = isLa,
         isPrivate: bool = isPriv,
