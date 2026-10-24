@@ -8,8 +8,6 @@ types: enum = {
     TABLE,
     ENUM,
     ARRAY,
-    DOUBLE,
-    FLOAT,
     INTEGER
 }
 

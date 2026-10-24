@@ -162,7 +162,7 @@ private function statement(state: table) {
         return importStatement(state)
     }
     if (check(state, tokenTypes.TOKEN_LOCAL)) {
-        return localStatement(state, true) // Should always be private so we pass it true without storing it previously (magic bool)
+        return localStatement(state, true)
     }
 
     if (check(state, tokenTypes.TOKEN_IDENTIFIER) && peekNext(state).type == tokenTypes.TOKEN_COLON) {
@@ -314,6 +314,10 @@ private function hasReturnStatement(body: array): bool {
             if (hasReturnStatement(body[i].statements)) {
                 return true
             }
+        } elseif (body[i].type == statementTypes.WHILE_STATEMENT || body[i].type == statementTypes.FOR_STATEMENT) {
+            if (hasReturnStatement(body[i].body)) {
+                return true
+            }
         }
     }
 
@@ -402,7 +406,7 @@ private function varDeclareStatement(state: table, isPrivate: bool) {
     nameToken = advance(state)
     line: num = nameToken.line
 
-    move(state)
+    expect(state, tokenTypes.TOKEN_COLON, "expected ':' after variable name")
 
     declaredType = parseTypeAnnotation(state)
 
@@ -471,7 +475,7 @@ private function ifStatement(state: table) {
 private function blockStatement(state: table) {
     line: num = peek(state).line
     move(state)
-    statements = statementList(state, [tokenTypes.TOKEN_RBRACE]) // Not made yet so can't test this line specifically
+    statements = statementList(state, [tokenTypes.TOKEN_RBRACE])
 
     expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close block")
     return makeBlockStatement(statements, line)
@@ -613,12 +617,12 @@ private function primaryBase(state: table) {
 
         if (!check(state, tokenTypes.TOKEN_RBRACE)) {
             while (true) {
-                if (check(state, tokenTypes.TOKEN_IDENTIFIER)) {
-                    token = expect(state, tokenTypes.TOKEN_IDENTIFIER, "Expected field name")
+                if (check(state, tokenTypes.TOKEN_IDENTIFIER) && (peekNext(state).type == tokenTypes.TOKEN_ASSIGN || peekNext(state).type == tokenTypes.TOKEN_COLON || peekNext(state).type == tokenTypes.TOKEN_COMMA || peekNext(state).type == tokenTypes.TOKEN_RBRACE)) {
+                    nameToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "Expected field name")
 
                     if (match(state, tokenTypes.TOKEN_ASSIGN)) {
                         valExpr: table = expression(state)
-                        push(fields, {key = token.value, value = valExpr, fieldType = types.ANY})
+                        push(fields, {key = nameToken.value, value = valExpr, fieldType = types.ANY})
                     }
                     elseif (match(state, tokenTypes.TOKEN_COLON)) {
                         fType: num = parseTypeAnnotation(state)
@@ -631,10 +635,10 @@ private function primaryBase(state: table) {
                             }
                             valExpr = desugarEnumTable(valExpr)
                         }
-                        push(fields, {key = token.value, value = valExpr, fieldType = fType})
+                        push(fields, {key = nameToken.value, value = valExpr, fieldType = fType})
                     } else {
-                        valExpr = makeNumberExpr(index, token.line)
-                        push(fields, {key = token.value, value = valExpr, fieldType = types.NUMBER})
+                        valExpr = makeNumberExpr(index, nameToken.line)
+                        push(fields, {key = nameToken.value, value = valExpr, fieldType = types.NUMBER})
                         index = index + 1
                     }
                 } else {
@@ -645,6 +649,9 @@ private function primaryBase(state: table) {
                 }
 
                 if (match(state, tokenTypes.TOKEN_COMMA)) {
+                    if (check(state, tokenTypes.TOKEN_RBRACE)) {
+                        break
+                    }
                 } else {
                     break
                 }
@@ -664,6 +671,9 @@ private function primaryBase(state: table) {
                 push(elements, valExpr)
 
                 if (match(state, tokenTypes.TOKEN_COMMA)) {
+                    if (check(state, tokenTypes.TOKEN_RBRACKET)) {
+                        break
+                    }
                 } else {
                     break
                 }
@@ -723,6 +733,9 @@ private function finishCall(state: table, callee, line) {
     if (!check(state, tokenTypes.TOKEN_RPAREN)) {
         push(arguments, expression(state))
         while (match(state, tokenTypes.TOKEN_COMMA)) {
+            if (check(state, tokenTypes.TOKEN_RPAREN)) {
+                break
+            }
             push(arguments, expression(state))
         }
     }
@@ -737,11 +750,9 @@ function testProgram(src: str) {
     print(src)
     print("----------------------------------------")
 
-    -- 1. Lex the source code
     lState = lexerState(src)
     toks = tokenize(lState)
 
-    -- 2. Parse into statements
     pState = parseState(toks)
     stmts = parseProgram(pState)
 
@@ -751,37 +762,30 @@ function testProgram(src: str) {
         s = stmts[i]
         print("[" + i + "] Statement Type: " + s.type + " | Line: " + s.line)
 
-        -- Inspect VarDeclare / Local
         if (s.type == statementTypes.VARDECLARE_STATEMENT) {
             print("    -> VarDecl: name='" + s.name + "' | typeAnno=" + s.typeAnnotation + " | isPrivate=" + s.isPrivate)
         }
 
-        -- Inspect Functions
         if (s.type == statementTypes.FUNCTION_STATEMENT) {
             print("    -> Function: name='" + s.name + "' | params=" + length(s.parameters) + " | parent='" + s.parentName + "' | isPrivate=" + s.isPrivate)
         }
 
-        -- Inspect If Statements
         if (s.type == statementTypes.IF_STATEMENT) {
             print("    -> If Statement: thenCount=" + length(s.thenBranch) + " | elseCount=" + length(s.elseBranch))
         }
 
-        -- Inspect While Loops
         if (s.type == statementTypes.WHILE_STATEMENT) {
             print("    -> While Loop: bodyStatements=" + length(s.body))
         }
 
-        -- Inspect For Loops
         if (s.type == statementTypes.FOR_STATEMENT) {
             print("    -> For Loop: isCStyle=" + s.isCStyle + " | bodyStatements=" + length(s.body))
         }
 
-        -- Inspect Expression Statements
         if (s.type == statementTypes.EXPRESSION_STATEMENT) {
             print("    -> ExpressionStmt: exprType=" + s.expression.type)
         }
 
-        -- Inspect Returns
         if (s.type == statementTypes.RETURN_STATEMENT) {
             hasVal = s.value != null
             print("    -> ReturnStmt: hasValue=" + hasVal)
@@ -789,20 +793,3 @@ function testProgram(src: str) {
     }
     print("========================================\n")
 }
-
--- 1. Test Variables (Typed, Local, Private)
-testProgram("x: num = 42\nlocal name = \"Borp\"\nprivate secret: num = 999")
-
--- 2. Test Function (with types and inheritance)
-testProgram("function add(a: num, b: num): num {\n    return a + b\n}\n\nfn Player() -> Entity {\n}")
-
--- 3. Test If-Else (Both block styles)
-testProgram("if x > 10 {\n    print(x)\n} else {\n    print(0)\n}\n\nif y == 5 then\n    return true\nend")
-
--- 4. Test Loops (While, For C-style, For Range)
-testProgram("while true {\n    break\n}\n\nfor i = 0, 10, 1 {\n    print(i)\n}\n\nfor i = 0, i < 5, i = i + 1 {\n    print(i)\n}")
-
--- 5. Test Assignments & Chaining
-testProgram("player.health = 100\nitems[0] = \"Sword\"\nresult = compute(1, 2)")
-
-testProgram("print('hello world')")
