@@ -1,6 +1,6 @@
 import "lexer.borp"
 import "ast.borp"
-import "tokenTypes.borp"
+import "tokentypes.borp"
 
 function parseState(tokens: array) {
     state: table = {
@@ -27,7 +27,7 @@ function parseProgram(state) {
     return statements
 }
 
-function check(state: table, expectedType): bool {
+function check(state: table, expectedType: num): bool {
     if (isAtEnd(state)) { 
         return false
     }
@@ -37,7 +37,7 @@ function check(state: table, expectedType): bool {
     return tok.type == expectedType
 }
 
-function match(state: table, expectedType) {
+function match(state: table, expectedType: num) {
     if (check(state, expectedType)) {
         tok = peek(state)
         move(state)
@@ -47,7 +47,7 @@ function match(state: table, expectedType) {
     return null
 }
 
-function matchMulti(state: table, expectedTypes) {
+function matchMulti(state: table, expectedTypes: array) {
     for i = 0, length(expectedTypes) - 1 {
         if (check(state, expectedTypes[i])) {
             move(state)
@@ -57,7 +57,7 @@ function matchMulti(state: table, expectedTypes) {
     return false
 }
 
-function consume(state: table, expectedType, errorMsg: str) {
+function consume(state: table, expectedType: num, errorMsg: str) {
     if (check(state, expectedType)) {
         tok = peek(state)
         move(state)
@@ -77,7 +77,7 @@ function advance(state: table): table {
     return token
 }
 
-private function expect(state: table, expectedType, errorMsg: str) {
+private function expect(state: table, expectedType: num, errorMsg: str) {
     return consume(state, expectedType, errorMsg)
 }
 
@@ -86,6 +86,18 @@ private function expression(state: table) {
 }
 
 private function parseTypeAnnotation(state: table): num {
+       baseType: num = parseBaseType(state)
+
+       if (match(state, tokenTypes.TOKEN_QUESTION)) {
+           if (baseType == types.NUMBER || baseType == types.INTEGER || baseType == types.DOUBLE || baseType == types.FLOAT || baseType == types.BOOLEAN) {
+               return types.ANY
+           }
+       }
+
+       return baseType
+   }
+
+private function parseBaseType(state: table): num {
     tokenType: table = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected type name")
 
     if (tokenType.value == "number" || tokenType.value == "num") { return types.NUMBER }
@@ -205,7 +217,7 @@ private function importStatement(state: table) {
     return makeImportStatement(path, line)
 }
 
-private function localStatement(state: table, isPrivate: bool) {
+private function localStatement(state: table, isPrivate: bool?) {
     line: num = advance(state).line
 
     nameToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected a variable name after 'local'")
@@ -324,7 +336,7 @@ private function hasReturnStatement(body: array): bool {
     return false
 }
 
-private function functionStatement(state: table, isPrivate: bool) {
+private function functionStatement(state: table, isPrivate: bool?) {
     line: num = advance(state).line
     nameToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected function name")
 
@@ -375,10 +387,10 @@ private function functionStatement(state: table, isPrivate: bool) {
         isPrivate = false
     }
 
-    if (returnType ~= types.ANY && !hasReturnStatement(body)) {
-        print("Parser Error on line " + line + ": Function '" + nameToken.value + "' declared return type but has no return statement.")
-        returnType = types.ANY
-    }
+    --if (returnType ~= types.ANY && !hasReturnStatement(body)) {
+    --    print("Parser Error on line " + line + ": Function '" + nameToken.value + "' declared return type but has no return statement.")
+    --    returnType = types.ANY
+    --}
 
     hasReturn: bool = false
     if (hasReturnStatement(body)) {
@@ -402,7 +414,7 @@ private function returnStatement(state: table) {
     return makeReturnStatement(value, line)
 }
 
-private function varDeclareStatement(state: table, isPrivate: bool) {
+private function varDeclareStatement(state: table, isPrivate: bool?) {
     nameToken = advance(state)
     line: num = nameToken.line
 
@@ -587,7 +599,7 @@ private function assignment(state: table) {
     return expr
 }
 
-private function primaryBase(state: table) {
+private function primaryBase(state: table): table {
     if (check(state, tokenTypes.TOKEN_NUMBER)) {
         token: table = consume(state, tokenTypes.TOKEN_NUMBER, "Unexpected type detected")
         return makeNumberExpr(token.value, token.line)
@@ -699,6 +711,7 @@ private function primaryBase(state: table) {
     }
 
     print("Expected expression at line " + peek(state).line)
+    return {}
 }
 
 private function primary(state: table) {
@@ -742,54 +755,4 @@ private function finishCall(state: table, callee, line) {
 
     expect(state, tokenTypes.TOKEN_RPAREN, "expected ')' after arguments")
     return makeCallExpr(callee, arguments, line)
-}
-
-function testProgram(src: str) {
-    print("========================================")
-    print("Testing Program Source:")
-    print(src)
-    print("----------------------------------------")
-
-    lState = lexerState(src)
-    toks = tokenize(lState)
-
-    pState = parseState(toks)
-    stmts = parseProgram(pState)
-
-    print("Parsed statements count: " + length(stmts))
-
-    for i = 0, length(stmts) - 1 {
-        s = stmts[i]
-        print("[" + i + "] Statement Type: " + s.type + " | Line: " + s.line)
-
-        if (s.type == statementTypes.VARDECLARE_STATEMENT) {
-            print("    -> VarDecl: name='" + s.name + "' | typeAnno=" + s.typeAnnotation + " | isPrivate=" + s.isPrivate)
-        }
-
-        if (s.type == statementTypes.FUNCTION_STATEMENT) {
-            print("    -> Function: name='" + s.name + "' | params=" + length(s.parameters) + " | parent='" + s.parentName + "' | isPrivate=" + s.isPrivate)
-        }
-
-        if (s.type == statementTypes.IF_STATEMENT) {
-            print("    -> If Statement: thenCount=" + length(s.thenBranch) + " | elseCount=" + length(s.elseBranch))
-        }
-
-        if (s.type == statementTypes.WHILE_STATEMENT) {
-            print("    -> While Loop: bodyStatements=" + length(s.body))
-        }
-
-        if (s.type == statementTypes.FOR_STATEMENT) {
-            print("    -> For Loop: isCStyle=" + s.isCStyle + " | bodyStatements=" + length(s.body))
-        }
-
-        if (s.type == statementTypes.EXPRESSION_STATEMENT) {
-            print("    -> ExpressionStmt: exprType=" + s.expression.type)
-        }
-
-        if (s.type == statementTypes.RETURN_STATEMENT) {
-            hasVal = s.value != null
-            print("    -> ReturnStmt: hasValue=" + hasVal)
-        }
-    }
-    print("========================================\n")
 }

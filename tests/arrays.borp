@@ -1,0 +1,10 @@
+nums = [10, 20, 30]
+push(nums, 40)
+print(length(nums))
+print(nums[0])
+print(nums[3])
+total = 0
+for i = 0, length(nums) - 1 {
+    total = total + nums[i]
+}
+print(total)

@@ -1,0 +1,8 @@
+s = "hello"
+print(length(s))
+print(charAt(s, 1))
+print("a" + "b")
+print("n=" + 5)
+if (s == "hello") {
+    print("equal")
+}

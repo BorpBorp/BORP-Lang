@@ -1,174 +1,405 @@
 import "ast.borp"
-import "tokenTypes.borp"
-import "parser.borp"
 import "lexer.borp"
+import "parser.borp"
+import "tokentypes.borp"
 
-private function provFunctions(fnName: str, args: str): str {
+private function asStr(e: table): str {
+    code: str = genExpr(e)
+    if (e.inferredType == types.STRING) { return code }
+    if (e.inferredType == types.NUMBER) { return "borp_num_to_str(" + code + ")" }
+    return "borp_to_text(" + code + ")"
+}
+
+private function isMathematical(tokenType: num): bool {
+    if (tokenType == tokenTypes.TOKEN_PLUS ||
+        tokenType == tokenTypes.TOKEN_MINUS ||
+        tokenType == tokenTypes.TOKEN_STAR ||
+        tokenType == tokenTypes.TOKEN_SLASH
+    ) { return true }
+
+    return false
+}
+
+private function isComparative(tokenType: num): bool {
+    if (tokenType == tokenTypes.TOKEN_EQUALS ||
+        tokenType == tokenTypes.TOKEN_NOT_EQUAL ||
+        tokenType == tokenTypes.TOKEN_LESSER ||
+        tokenType == tokenTypes.TOKEN_GREATER ||
+        tokenType == tokenTypes.TOKEN_LESSER_EQUAL ||
+        tokenType == tokenTypes.TOKEN_GREATER_EQUAL ||
+        tokenType == tokenTypes.TOKEN_AND ||
+        tokenType == tokenTypes.TOKEN_OR
+    ) { return true }
+
+    return false
+}
+
+private function isEnumRef(target: table, env: table): bool {
+    if (target.type == astTypes.IDENTIFIER_EXPR && lookupEnv(env, target.value) == types.ENUM) {
+        return true
+    }
+    return false
+}
+
+private function createEnv(parentEnv: table?): table {
+    environment: table = {
+        vars: table = {},
+        funcs: table = {},
+        parent: table? = parentEnv
+    }
+
+    return environment
+}
+
+private function defineEnv(env: table, name, type: num) {
+    env.vars[name] = type
+}
+
+private function lookupEnv(env, name): num? {
+    if (env.vars[name] ~= null) {
+        return env.vars[name]
+    } elseif (env.parent ~= null) {
+        return lookupEnv(env.parent, name)
+    } else {
+        return null
+    }
+}
+
+private function lookupFunc(env, name): table? {
+    if (env.funcs[name] ~= null) {
+        return env.funcs[name]
+    } elseif (env.parent ~= null) {
+        return lookupFunc(env.parent, name)
+    } else {
+        return null
+    }
+}
+
+private function resolveExpr(expr: table, env: table): num {
+    if (expr.type == astTypes.NUMBER_EXPR) {
+        expr.inferredType = types.NUMBER
+        return types.NUMBER
+    } elseif (expr.type == astTypes.STRING_EXPR) {
+        expr.inferredType = types.STRING
+        return types.STRING
+    } elseif (expr.type == astTypes.BOOL_EXPR) {
+        expr.inferredType = types.BOOLEAN
+        return types.BOOLEAN
+    } elseif (expr.type == astTypes.NULL_EXPR) {
+        expr.inferredType = types.ANY
+        return types.ANY
+    } elseif (expr.type == astTypes.IDENTIFIER_EXPR) {
+        varType: num? = lookupEnv(env, expr.value)
+        
+        if (varType ~= null) {
+            expr.inferredType = varType
+        } else {
+            expr.inferredType = types.ANY
+        }
+
+        return expr.inferredType
+    } elseif (expr.type == astTypes.TABLE_EXPR) {
+        expr.inferredType = types.TABLE
+
+        for i = 0, length(expr.fields) - 1 {
+            resolveExpr(expr.fields[i].value, env)
+        }
+
+        return types.TABLE
+    } elseif (expr.type == astTypes.ARRAY_EXPR) {
+        expr.inferredType = types.ARRAY
+
+        for i = 0, length(expr.elements) - 1 {
+            resolveExpr(expr.elements[i], env)
+        }
+
+        return types.ARRAY
+    } elseif (expr.type == astTypes.UNARY_EXPR) {
+        resolveExpr(expr.operand, env)
+
+        if (expr.tokenType == tokenTypes.TOKEN_MINUS) {
+            expr.inferredType = types.NUMBER
+
+            return types.NUMBER
+        } else {
+            expr.inferredType = types.BOOLEAN
+
+            return types.BOOLEAN
+        }
+    } elseif (expr.type == astTypes.BINARY_EXPR) {
+        leftType: num = resolveExpr(expr.left, env)
+        rightType: num = resolveExpr(expr.right, env)
+
+        if (expr.tokenType == tokenTypes.TOKEN_PLUS && (leftType == types.STRING || rightType == types.STRING)) {
+            expr.inferredType = types.STRING
+            return types.STRING
+        } elseif (isMathematical(expr.tokenType)) {
+            expr.inferredType = types.NUMBER
+
+            return types.NUMBER
+        } elseif (isComparative(expr.tokenType)) {
+            expr.inferredType = types.BOOLEAN
+
+            return types.BOOLEAN
+        } else {
+            expr.inferredType = types.STRING
+
+            return types.STRING
+        }
+    } elseif (expr.type == astTypes.ASSIGN_EXPR) {
+        valType: num = resolveExpr(expr.value, env)
+
+        expr.targetType = lookupEnv(env, expr.name)
+
+        expr.inferredType = valType
+
+        return valType
+    } elseif (expr.type == astTypes.CALL_EXPR) {
+        sig: table? = lookupFunc(env, expr.callee.value)
+
+        for i = 0, length(expr.arguments) - 1 {
+            resolveExpr(expr.arguments[i], env)
+
+            if (sig ~= null && i < length(sig.parameters)) {
+                expr.arguments[i].expectedType = sig.parameters[i].type
+            }
+        }
+
+        if (sig ~= null) {
+            expr.cName = sig.cName
+        }
+
+        returnType: num? = lookupEnv(env, expr.callee.value)
+        if (returnType == null) {
+            returnType = types.ANY
+        }
+
+        expr.inferredType = returnType
+
+        return returnType
+    } elseif (expr.type == astTypes.INDEX_EXPR) {
+        resolveExpr(expr.target, env)
+        resolveExpr(expr.key, env)
+
+        if (isEnumRef(expr.target, env)) {
+            expr.isEnumAccess = true
+            expr.inferredType = types.NUMBER
+            return types.NUMBER
+        } else {
+            expr.inferredType = types.ANY
+
+            return types.ANY
+        }
+    } elseif (expr.type == astTypes.INDEX_ASSIGN_EXPR) {
+        resolveExpr(expr.target, env)
+        resolveExpr(expr.key, env)
+        valType: num = resolveExpr(expr.value, env)
+
+        expr.inferredType = valType
+
+        return valType
+    }
+
+    return 0
+}
+
+private function resolveStatement(stmt, env) {
+    if (stmt.type == statementTypes.EXPRESSION_STATEMENT) {
+        resolveExpr(stmt.expression, env)
+
+        e = stmt.expression
+        if (e.type == astTypes.ASSIGN_EXPR && lookupEnv(env, e.name) == null) {
+            defineEnv(env, e.name, e.inferredType)
+            e.isDeclaration = true
+        }
+    } elseif (stmt.type == statementTypes.RETURN_STATEMENT) {
+        if (stmt.value ~= null) {
+            resolveExpr(stmt.value, env)
+        }
+    } elseif (stmt.type == statementTypes.VARDECLARE_STATEMENT) {
+        resolveExpr(stmt.initializer, env)
+
+        stmtType: num? = stmt.typeAnnotation
+        if (stmtType == null || stmtType == types.ANY) {
+            stmtType = stmt.initializer.inferredType
+        }
+
+        defineEnv(env, stmt.name, stmtType)
+    } elseif (stmt.type == statementTypes.FUNCTION_STATEMENT) {
+        defineEnv(env, stmt.name, stmt.returnType)
+        env.funcs[stmt.name] = stmt
+
+        fnEnv: table = createEnv(env)
+
+        for i = 0, length(stmt.parameters) - 1 {
+            defineEnv(fnEnv, stmt.parameters[i].name, stmt.parameters[i].type)
+        }
+
+        resolveStatementList(stmt.body, fnEnv)
+    } elseif (stmt.type == statementTypes.BLOCK_STATEMENT) {
+        blockEnv: table = createEnv(env)
+
+        resolveStatementList(stmt.statements, blockEnv)
+    } elseif (stmt.type == statementTypes.IF_STATEMENT) {
+        resolveExpr(stmt.condition, env)
+        resolveStatementList(stmt.thenBranch, createEnv(env))
+        resolveStatementList(stmt.elseBranch, createEnv(env))
+    } elseif (stmt.type == statementTypes.WHILE_STATEMENT) {
+        resolveExpr(stmt.condition, env)
+        resolveStatementList(stmt.body, createEnv(env))
+    } elseif (stmt.type == statementTypes.FOR_STATEMENT) {
+        forEnv: table = createEnv(env)
+
+        if (!stmt.isCStyle) {
+            defineEnv(forEnv, stmt.clause1.name, types.NUMBER)
+        }
+
+        resolveExpr(stmt.clause1, forEnv)
+        resolveExpr(stmt.clause2, forEnv)
+        if (stmt.clause3 ~= null) {
+            resolveExpr(stmt.clause3, forEnv)
+        }
+
+        resolveStatementList(stmt.body, forEnv)
+    }
+}
+
+private function resolveStatementList(stmts: array, env: table) {
+    for i = 0, length(stmts) - 1 {
+        resolveStatement(stmts[i], env)
+    }
+}
+
+private function defineBuiltin(env: table, name: str, cName: str, retType: num, paramTypes: array) {
+    params: array = []
+
+    for i = 0, length(paramTypes) - 1 {
+        push(params, { name: str = "p" + toString(i), type: num = paramTypes[i] })
+    }
+
+    env.funcs[name] = {
+        name: str = name,
+        cName: str = cName,
+        parameters: array = params,
+        returnType: num = retType
+    }
+    defineEnv(env, name, retType)
+}
+
+function resolveProgram(statements: array) {
+    globalEnv: table = createEnv(null)
+
+    for i = 0, length(statements) - 1 {
+        if (statements[i].type == statementTypes.FUNCTION_STATEMENT) {
+            globalEnv.funcs[statements[i].name] = statements[i]
+            defineEnv(globalEnv, statements[i].name, statements[i].returnType)
+        }
+    }
+
+    defineBuiltin(globalEnv, "length",     "borp_length",       types.NUMBER,  [types.ANY])
+    defineBuiltin(globalEnv, "push",       "borp_push",         types.NUMBER,  [types.ARRAY, types.ANY])
+    defineBuiltin(globalEnv, "pop",        "borp_pop",          types.ANY,     [types.ARRAY])
+    defineBuiltin(globalEnv, "join",       "borp_join",         types.STRING,  [types.ARRAY, types.ANY])
+    defineBuiltin(globalEnv, "charAt",     "charAt",            types.STRING,  [types.STRING, types.INTEGER])
+    defineBuiltin(globalEnv, "substring",  "borp_substring",    types.STRING,  [types.STRING, types.INTEGER, types.INTEGER])
+    defineBuiltin(globalEnv, "isNumeric",  "borp_is_numeric",   types.BOOLEAN, [types.ANY])
+    defineBuiltin(globalEnv, "toNumber",   "borp_parse_number", types.NUMBER,  [types.STRING])
+    defineBuiltin(globalEnv, "toString",   "borp_stringify",    types.STRING,  [types.ANY])
+    defineBuiltin(globalEnv, "readFile",   "borp_read_file",    types.STRING,  [types.STRING])
+    defineBuiltin(globalEnv, "writeFile",  "borp_write_file",   types.BOOLEAN, [types.STRING, types.ANY])
+    defineBuiltin(globalEnv, "runCommand", "borp_run_command",  types.NUMBER,  [types.STRING])
+    defineBuiltin(globalEnv, "argCount",   "borp_arg_count",    types.NUMBER,  [])
+    defineBuiltin(globalEnv, "getArg",     "borp_get_arg",      types.STRING,  [types.NUMBER])
+
+    resolveStatementList(statements, globalEnv)
+}
+
+private function escapeC(s: str): str {
+    out: str = ""
+
+    for i = 0, length(s) - 1 {
+        ch = charAt(s, i)
+
+        if (ch == "\\") {
+            out = out + "\\\\"
+        } elseif (ch == '"') {
+            out = out + "\\\""
+        } elseif (ch == "\n") {
+            out = out + "\\n"
+        } elseif (ch == "\t") {
+            out = out + "\\t"
+        } elseif (ch == "\r") {
+            out = out + "\\r"
+        } else {
+            out = out + ch
+        }
+    }
+
+    return out
+}
+
+private function boxValue(expr: table): str {
+    valCode: str = genExpr(expr)
+
+    if (expr.inferredType == types.NUMBER)  {return "borp_val_num(" + valCode + ")"}
+    if (expr.inferredType == types.STRING)  {return "borp_val_string(" + valCode + ")"}
+    if (expr.inferredType == types.BOOLEAN) {return "borp_val_boolean(" + valCode + ")"}
+    if (expr.inferredType == types.TABLE)   {return "borp_val_table(" + valCode + ")"}
+    if (expr.inferredType == types.ARRAY)   {return "borp_val_array(" + valCode + ")"}
+    if (expr.type == astTypes.NULL_EXPR)    {return "borp_val_null()"}
+    
+    return valCode
+}
+
+private function coerceTo(expr: table, targetType: num): str {
+    valCode: str = genExpr(expr)
+
+    if (expr.type == astTypes.NULL_EXPR) {
+        if (targetType == types.STRING || targetType == types.TABLE || targetType == types.ARRAY) {
+            return "NULL"
+        }
+    }
+
+    if (targetType == types.STRING && expr.inferredType == types.ANY) {
+        return "borp_to_str(" + valCode + ")"
+    }
+
+    if (targetType == types.NUMBER && expr.inferredType == types.ANY) {
+        return "borp_to_num(" + valCode + ")"
+    }
+
+    if (targetType == types.BOOLEAN && expr.inferredType == types.ANY) {
+        return "borp_to_bool(" + valCode + ")"
+    }
+
+    if (targetType == types.INTEGER && expr.inferredType == types.ANY) {
+        return "(int)borp_to_num(" + valCode + ")"
+    }
+
+    if (targetType == types.TABLE && expr.inferredType == types.ANY) {
+        return "borp_to_table(" + valCode + ")"
+    }
+
+    if (targetType == types.ARRAY && expr.inferredType == types.ANY) {
+        return "borp_to_array(" + valCode + ")"
+    }
+
+    return valCode
+}
+
+private function provFunctions(fnName: str, expr: table): str {
     if (fnName == "print") {
-        return "printf(\"%g\\n\", " + args + ")"
+        if (length(expr.arguments) > 0) {
+            return "borp_print_val(" + boxValue(expr.arguments[0]) + ")"
+        } else {
+            return "printf(\"\\n\")"
+        }
     }
     if (fnName == "length") {
-        return "borp_length(" + args + ")"
-    }
-    if (fnName == "push") {
-        return "borp_array_push(" + args + ")"
-    }
-    if (fnName == "pop") {
-        return "borp_array_pop(" + args + ")"
-    }
-}
-
-private function boxExpr(valExpr: table): str {
-    if (valExpr.type == astTypes.NUMBER_EXPR) {
-        return "borp_val_num(" + genExpr(valExpr) + ")"
-    } elseif (valExpr.type == astTypes.STRING_EXPR) {
-        return "borp_val_string(" + genExpr(valExpr) + ")"
-    } elseif (valExpr.type == astTypes.BOOL_EXPR) {
-        return "borp_val_boolean(" + genExpr(valExpr) + ")"
-    } elseif (valExpr.type == astTypes.TABLE_EXPR) {
-        return "borp_val_table(" + genExpr(valExpr) + ")"
+        return "borp_length(" + boxValue(expr.arguments[0]) + ")"
     }
 
-    return "borp_val_string(" + genExpr(valExpr) + ")"
-}
-
-private function genExpr(expr: table): str {
-    if (expr.type == astTypes.NUMBER_EXPR) {
-        return toString(expr.value)
-    }
-    if (expr.type == astTypes.STRING_EXPR) {
-        return '"' + expr.value + '"'
-    }
-    if (expr.type == astTypes.BOOL_EXPR) {
-        if (expr.value) {
-            return "true"
-        } else {
-            return "false"
-        }
-    }
-    if (expr.type == astTypes.ARRAY_EXPR) {
-        if (length(expr.elements) == 0) {
-            return "borp_array_create(0)"
-        } elseif (length(expr.elements) > 0) {
-            elems: str = ""
-            for i = 0, length(expr.elements) - 1 {
-                if (i < length(expr.elements) - 1) {
-                    elems = elems + genExpr(expr.elements[i]) + ", "
-                } else {
-                    elems = elems + genExpr(expr.elements[i])
-                }
-            }
-            return "borp_array_from_elements(" + length(expr.elements) + ", (double[]){" + elems + "})"
-        }
-    }
-    if (expr.type == astTypes.INDEX_EXPR) {
-        target: str = genExpr(expr.target)
-        key: str = ""
-        
-        if (expr.key.type == astTypes.STRING_EXPR) {
-            key = genExpr(expr.key)
-            return "borp_table_get(" + target + ", " + key + ").as.number"
-        }
-
-        key: str = genExpr(expr.key)
-        return "borp_array_get(" + target + ", (int)(" + key + "))"
-    }
-    if (expr.type == astTypes.INDEX_ASSIGN_EXPR) {
-        target: str = genExpr(expr.target)
-        key: str = genExpr(expr.key)
-        value: str = genExpr(expr.value)
-
-        if (expr.key.type == astTypes.STRING_EXPR) {
-            return "borp_table_set(" + target + ", " + key + ", " + boxExpr(expr.value) + ")"
-        }
-
-        return "borp_array_set(" + target + ", (int)(" + key + "), " + value + ")"
-    }
-    if (expr.type == astTypes.TABLE_EXPR) {
-        if (length(expr.fields) == 0) {
-            return "borp_table_create(0)"
-        } elseif (length(expr.fields) > 0) {
-            keys: str = ""
-            vals: str = ""
-            for i = 0, length(expr.fields) - 1 {
-                if (i < length(expr.fields) - 1) {
-                    keys = keys + "\"" + expr.fields[i].key + "\", "
-                    vals = vals + boxExpr(expr.fields[i].value) + ", "
-                } else {
-                    keys = keys + "\"" + expr.fields[i].key + "\""
-                    vals = vals + boxExpr(expr.fields[i].value)
-                }
-            }
-            return "borp_table_from_entries(" + toString(length(expr.fields)) + ", (const char*[]){" + keys + "}, (BorpValue[]){" + vals + "})"
-        }
-    }
-    if (expr.type == astTypes.NULL_EXPR) {
-        return "NULL"
-    }
-    if (expr.type == astTypes.IDENTIFIER_EXPR) {
-        return expr.value
-    }
-    if (expr.type == astTypes.ASSIGN_EXPR) {
-        return expr.name + " = " + genExpr(expr.value)
-    }
-    if (expr.type == astTypes.CALL_EXPR) {
-        args: str = ""
-        if (length(expr.arguments) > 0) {
-            for i = 0, length(expr.arguments) - 1 {
-                if (i < length(expr.arguments) - 1) {
-                    args = args + genExpr(expr.arguments[i]) + ", "
-                } else {
-                    args = args + genExpr(expr.arguments[i])
-                }
-            }
-        }
-        builtin = provFunctions(expr.callee.value, args)
-
-        if (builtin ~= null) {
-            return builtin
-        }
-
-        return genExpr(expr.callee) + "(" + args + ")"
-    }
-
-    if (expr.type == astTypes.UNARY_EXPR) {
-        if (expr.tokenType == tokenTypes.TOKEN_MINUS) {
-            return "(-" + genExpr(expr.operand) + ")"
-        } else {
-            return "(! " + genExpr(expr.operand) + ")"
-        }
-    }
-
-    if (expr.type == astTypes.BINARY_EXPR) {
-        operand: str = ""
-        if (expr.tokenType == tokenTypes.TOKEN_PLUS) {
-            operand = "+"
-        } elseif (expr.tokenType == tokenTypes.TOKEN_MINUS) {
-            operand = "-"
-        } elseif (expr.tokenType == tokenTypes.TOKEN_STAR) {
-            operand = "*"
-        } elseif (expr.tokenType == tokenTypes.TOKEN_SLASH) {
-            operand = "/"
-        } elseif (expr.tokenType == tokenTypes.TOKEN_EQUALS) {
-            operand = "=="
-        } elseif (expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
-            operand = "!="
-        } elseif (expr.tokenType == tokenTypes.TOKEN_GREATER_EQUAL) {
-            operand = ">="
-        } elseif (expr.tokenType == tokenTypes.TOKEN_LESSER_EQUAL) {
-            operand = "<="
-        } elseif (expr.tokenType == tokenTypes.TOKEN_LESSER) {
-            operand = "<"
-        } elseif (expr.tokenType == tokenTypes.TOKEN_GREATER) {
-            operand = ">"
-        } elseif (expr.tokenType == tokenTypes.TOKEN_AND) {
-            operand = "&&"
-        } elseif (expr.tokenType == tokenTypes.TOKEN_OR) {
-            operand = "||"
-        }
-
-        return "(" + genExpr(expr.left) + " " + operand + " " + genExpr(expr.right) + ")"
-    }
+    return ""
 }
 
 private function cType(typeAnno: num): str {
@@ -186,22 +417,65 @@ private function cType(typeAnno: num): str {
         return "bool"
     } elseif (typeAnno == types.ENUM) {
         return "enum"
-    } elseif (typeAnno == types.ARRAY) {
-        return "BorpArray*"
     } elseif (typeAnno == types.TABLE) {
         return "BorpTable*"
+    } elseif (typeAnno == types.ARRAY) {
+        return "BorpArray*"
     } elseif (typeAnno == types.ANY) {
-        return "BorpValue*"
+        return "BorpValue"
     }
 
     return "void"
 }
 
-private function genFunction(statement: table): str {
+private function dirOf(path: str): str {
+    last: num = -1
+
+    for i = 0, length(path) - 1 {
+        ch = charAt(path, i)
+        if (ch == "/" || ch == "\\") {
+            last = i
+        }
+    }
+
+    if (last < 0) {
+        return ""
+    }
+
+    return substring(path, 0, last + 1)
+}
+
+private function expandImports(statements: array, baseDir: str, visited: table): array {
+    result: array = []
+
+    for i = 0, length(statements) - 1 {
+        stmt = statements[i]
+
+        if (stmt.type == statementTypes.IMPORT_STATEMENT) {
+            path = baseDir + stmt.path
+
+            if (visited[path] == null) {
+                visited[path] = true
+
+                source = readFile(path)
+                imported = parseProgram(parseState(tokenize(lexerState(source))))
+                expanded = expandImports(imported, dirOf(path), visited)
+
+                for j = 0, length(expanded) - 1 {
+                    push(result, expanded[j])
+                }
+            }
+        } else {
+            push(result, stmt)
+        }
+    }
+
+    return result
+}
+
+private function generateHeaders(statement: table): str {
     retType: str = cType(statement.returnType)
     params: str = ""
-    body: str = genStatementList(statement.body)
-    locals: array = []
 
     if (length(statement.parameters) == 0) {
         params = ""
@@ -216,54 +490,344 @@ private function genFunction(statement: table): str {
         }
     }
 
-    if (statement.returnType == types.ANY) {
+    if (!statement.hasReturn) {
         retType = "void"
+    }
+
+    if (length(statement.parameters) == 0) {
+        params = "void"
     }
 
     if (statement.isPrivate) {
         retType = "static " + retType
     }
 
-    return retType + " " + statement.name + "(" + params + ") {\n" + body + "}\n"
+    return retType + " " + statement.name + "(" + params + ");\n"
 }
 
-private function genStatementList(statements: array): str {
+private function genExpr(expr: table): str {
+    if (expr.type == astTypes.NUMBER_EXPR) {
+        return toString(expr.value)
+    }
+    if (expr.type == astTypes.STRING_EXPR) {
+        return '"' + escapeC(expr.value) + '"'
+    }
+    if (expr.type == astTypes.BOOL_EXPR) {
+        if (expr.value) {
+            return "true"
+        } else {
+            return "false"
+        }
+    }
+    if (expr.type == astTypes.NULL_EXPR) {
+        return "NULL"
+    }
+    if (expr.type == astTypes.IDENTIFIER_EXPR) {
+        return expr.value
+    }
+    if (expr.type == astTypes.ASSIGN_EXPR) {
+        valCode: str = genExpr(expr.value)
+
+        if (expr.targetType ~= null) {
+            if (expr.targetType == types.ANY) {
+                valCode = boxValue(expr.value)
+            } else {
+                valCode = coerceTo(expr.value, expr.targetType)
+            }
+        }
+
+        return expr.name + " = " + valCode
+    }
+    if (expr.type == astTypes.CALL_EXPR) {
+        args: str = ""
+        if (length(expr.arguments) > 0) {
+            for i = 0, length(expr.arguments) - 1 {
+                arg = expr.arguments[i]
+                argCode: str = genExpr(arg)
+
+                if (arg.expectedType ~= null) {
+                    if (arg.expectedType == types.ANY) {
+                        argCode = boxValue(arg)
+                    } else {
+                        argCode = coerceTo(arg, arg.expectedType)
+                    }
+                }
+
+                if (i < length(expr.arguments) - 1) {
+                    args = args + argCode + ", "
+                } else {
+                    args = args + argCode
+                }
+            }
+        }
+        builtin = provFunctions(expr.callee.value, expr)
+
+        if (builtin ~= "") {
+            return builtin
+        }
+
+        calleeCode: str = genExpr(expr.callee)
+        if (expr.cName ~= null) { calleeCode = expr.cName }
+
+        return calleeCode + "(" + args + ")"
+    }
+
+    if (expr.type == astTypes.UNARY_EXPR) {
+        operandCode = genExpr(expr.operand)
+        if (expr.operand.inferredType == types.ANY) {
+            if (expr.tokenType == tokenTypes.TOKEN_MINUS) {
+                operandCode = "borp_to_num(" + operandCode + ")"
+            } else {
+                operandCode = "borp_to_bool(" + operandCode + ")"
+            }
+        }
+        if (expr.tokenType == tokenTypes.TOKEN_MINUS) {
+            return "(-" + operandCode + ")"
+        } else {
+            return "(! " + operandCode + ")"
+        }
+    }
+
+    if (expr.type == astTypes.BINARY_EXPR) {
+        operand: str = ""
+        isMathOrRelational: bool = false
+
+        if (expr.tokenType == tokenTypes.TOKEN_PLUS) { operand = "+"; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_MINUS) { operand = "-"; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_STAR) { operand = "*"; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_SLASH) { operand = "/"; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_GREATER_EQUAL) { operand = ">="; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_LESSER_EQUAL) { operand = "<="; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_LESSER) { operand = "<"; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_GREATER) { operand = ">"; isMathOrRelational = true }
+        elseif (expr.tokenType == tokenTypes.TOKEN_EQUALS) { operand = "==" }
+        elseif (expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) { operand = "!=" }
+        elseif (expr.tokenType == tokenTypes.TOKEN_AND) { operand = "&&" }
+        elseif (expr.tokenType == tokenTypes.TOKEN_OR) { operand = "||" }
+
+        if (expr.right.type == astTypes.NULL_EXPR) {
+            leftSide = genExpr(expr.left)
+            if (expr.left.inferredType == types.ANY) {
+                if (expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
+                    return leftSide + ".type != VAL_NULL"
+                } else {
+                    return leftSide + ".type == VAL_NULL"
+                }
+            }
+            if (expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
+                return leftSide + " != NULL"
+            } else {
+                return leftSide + " == NULL"
+            }
+        }
+
+        if (expr.left.type == astTypes.NULL_EXPR) {
+            rightSide = genExpr(expr.right)
+            if (expr.right.inferredType == types.ANY) {
+                if (expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
+                    return rightSide + ".type != VAL_NULL"
+                } else {
+                    return rightSide + ".type == VAL_NULL"
+                }
+            }
+            if (expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
+                return rightSide + " != NULL"
+            } else {
+                return rightSide + " == NULL"
+            }
+        }
+
+        if (expr.tokenType == tokenTypes.TOKEN_PLUS && expr.inferredType == types.STRING) {
+            return "borp_concat(" + asStr(expr.left) + ", " + asStr(expr.right) + ")"
+        }
+
+        leftCode: str = genExpr(expr.left)
+        rightCode: str = genExpr(expr.right)
+
+        if (isMathOrRelational) {
+            if (expr.left.inferredType == types.ANY) {
+                leftCode = "borp_to_num(" + leftCode + ")"
+            }
+            if (expr.right.inferredType == types.ANY) {
+                rightCode = "borp_to_num(" + rightCode + ")"
+            }
+        }
+
+        if (expr.tokenType == tokenTypes.TOKEN_EQUALS || expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
+            if (expr.left.inferredType == types.ANY && expr.right.inferredType != types.ANY) {
+                if (expr.right.inferredType == types.NUMBER) {
+                    leftCode = "borp_to_num(" + leftCode + ")"
+                } elseif (expr.right.inferredType == types.STRING) {
+                    leftCode = "borp_to_str(" + leftCode + ")"
+                } elseif (expr.right.inferredType == types.BOOLEAN) {
+                    leftCode = "borp_to_bool(" + leftCode + ")"
+                }
+            } elseif (expr.right.inferredType == types.ANY && expr.left.inferredType != types.ANY) {
+                if (expr.left.inferredType == types.NUMBER) {
+                    rightCode = "borp_to_num(" + rightCode + ")"
+                } elseif (expr.left.inferredType == types.STRING) {
+                    rightCode = "borp_to_str(" + rightCode + ")"
+                } elseif (expr.left.inferredType == types.BOOLEAN) {
+                    rightCode = "borp_to_bool(" + rightCode + ")"
+                }
+            }
+        }
+        
+        if (expr.tokenType == tokenTypes.TOKEN_EQUALS || expr.tokenType == tokenTypes.TOKEN_NOT_EQUAL) {
+            if (expr.left.inferredType == types.STRING || expr.right.inferredType == types.STRING) {
+                if (expr.tokenType == tokenTypes.TOKEN_EQUALS) {
+                    return "(strcmp(" + leftCode + ", " + rightCode + ") == 0)"
+                } else {
+                    return "(strcmp(" + leftCode + ", " + rightCode + ") != 0)"
+                }
+            }
+        }
+
+        return "(" + leftCode + " " + operand + " " + rightCode + ")"
+    }
+
+    if (expr.type == astTypes.INDEX_EXPR) {
+        if (expr.isEnumAccess ~= null) {
+            return expr.key.value
+        }
+
+        if (expr.key.inferredType == types.ANY) {
+            return "borp_index_get(" + boxValue(expr.target) + ", " + boxValue(expr.key) + ")"
+        }
+
+        targetCode: str = genExpr(expr.target)
+        
+        if (expr.target.inferredType == types.ANY) {
+            if (expr.key.type == astTypes.STRING_EXPR || expr.key.inferredType == types.STRING) {
+                targetCode = targetCode + ".as.borp_table"
+            } else {
+                targetCode = targetCode + ".as.borp_array"
+            }
+        }
+
+        if (expr.key.type == astTypes.STRING_EXPR || expr.key.inferredType == types.STRING) {
+            key: str = genExpr(expr.key)
+            return "borp_table_get(" + targetCode + ", " + key + ")"
+        }
+
+        key: str = genExpr(expr.key)
+        if (expr.key.inferredType == types.ANY) {
+            key = "(int)borp_to_num(" + key + ")"
+        } else {
+            key = "(int)(" + key + ")"
+        }
+        return "borp_array_get(" + targetCode + ", " + key + ")"
+    }
+
+    if (expr.type == astTypes.INDEX_ASSIGN_EXPR) {
+        target: str = genExpr(expr.target)
+        key: str = genExpr(expr.key)
+        wrappedVal: str = boxValue(expr.value)
+
+        if (expr.key.inferredType == types.ANY) {
+            return "borp_index_set(" + boxValue(expr.target) + ", " + boxValue(expr.key) + ", " + wrappedVal + ")"
+        }
+
+        if (expr.target.inferredType == types.ANY) {
+            if (expr.key.type == astTypes.STRING_EXPR || expr.key.inferredType == types.STRING) {
+                target = target + ".as.borp_table"
+            } else {
+                target = target + ".as.borp_array"
+            }
+        }
+
+        if (expr.key.type == astTypes.STRING_EXPR || expr.key.inferredType == types.STRING) {
+            return "borp_table_set(" + target + ", " + key + ", " + wrappedVal + ")"
+        }
+
+        if (expr.key.inferredType == types.ANY) {
+            key = "(int)borp_to_num(" + key + ")"
+        } else {
+            key = "(int)(" + key + ")"
+        }
+
+        return "borp_array_set(" + target + ", " + key + ", " + wrappedVal + ")"
+    }
+
+    if (expr.type == astTypes.TABLE_EXPR) {
+        if (length(expr.fields) == 0) {
+            return "borp_table_create(0)"
+        } elseif (length(expr.fields) > 0) {
+            keys: str = ""
+            vals: str = ""
+            for i = 0, length(expr.fields) - 1 {
+                field = expr.fields[i]
+                wrappedVal: str = boxValue(field.value)
+
+                if (i < length(expr.fields) - 1) {
+                    keys = keys + "\"" + field.key + "\", "
+                    vals = vals + wrappedVal + ", "
+                } else {
+                    keys = keys + "\"" + field.key + "\""
+                    vals = vals + wrappedVal
+                }
+            }
+            return "borp_table_from_entries(" + toString(length(expr.fields)) + ", (const char*[]){" + keys + "}, (BorpValue[]){" + vals + "})"
+        }
+    }
+
+    if (expr.type == astTypes.ARRAY_EXPR) {
+        if (length(expr.elements) == 0) {
+            return "borp_array_create(0)"
+        } elseif (length(expr.elements) > 0) {
+            elems: str = ""
+            for i = 0, length(expr.elements) - 1 {
+                wrappedVal: str = boxValue(expr.elements[i])
+
+                if (i < length(expr.elements) - 1) {
+                    elems = elems + wrappedVal + ", "
+                } else {
+                    elems = elems + wrappedVal
+                }
+            }
+
+            return "borp_array_from_elements(" + toString(length(expr.elements)) + ", (BorpValue[]){" + elems + "})"
+        }
+    }
+
+    return "NULL"
+}
+
+private function genStatementList(statements: array, fnReturnType: num): str {
     out: str = ""
 
-    for i = 0, length(statements) - 1 {
-        stmtCode = genStatement(statements[i])
-        if (stmtCode != null) {
-            out = out + stmtCode
+    if (length(statements) > 0) {
+        for i = 0, length(statements) - 1 {
+            stmtCode = genStatement(statements[i], fnReturnType)
+            if (stmtCode != null) {
+                out = out + stmtCode
+            }
         }
     }
     
     return out
 }
 
-private function genStatement(statement: table): str {
+private function genStatement(statement: table, fnReturnType: num): str {
     if (statement.type == statementTypes.EXPRESSION_STATEMENT) {
-        return genExpr(statement.expression) + ";\n"
+        e = statement.expression
+
+        if (e.type == astTypes.ASSIGN_EXPR && e.isDeclaration ~= null) {
+            valCode: str = genExpr(e.value)
+            if (e.inferredType == types.ANY) {
+                valCode = boxValue(e.value)
+            }
+            return cType(e.inferredType) + " " + e.name + " = " + valCode + ";\n"
+        }
+
+        return genExpr(e) + ";\n"
     }
     if (statement.type == statementTypes.VARDECLARE_STATEMENT) {
         typeStr: str = cType(statement.typeAnnotation)
         privStr: str = ""
 
         if (statement.typeAnnotation == types.ANY || typeStr == "void") {
-            initType = statement.initializer.type
-
-            if (initType == astTypes.NUMBER_EXPR) {
-                typeStr = "double"
-            } elseif (initType == astTypes.STRING_EXPR) {
-                typeStr = "const char*"
-            } elseif (initType == astTypes.BOOL_EXPR) {
-                typeStr = "bool"
-            } elseif (initType == astTypes.ARRAY_EXPR) {
-                typeStr = "BorpArray*"
-            } elseif (initType == astTypes.TABLE_EXPR) {
-                typeStr = "BorpTable*"
-            } else {
-                typeStr = "double"
-            }
+            typeStr = cType(statement.initializer.inferredType)
         }
 
         if (statement.initializer.type == astTypes.ENUM_EXPR) {
@@ -276,18 +840,31 @@ private function genStatement(statement: table): str {
                     enumMembers = enumMembers + member.name + " = " + member.value
                 }
             }
-            return typeStr + " {\n" + enumMembers +  "};\n"
+            return typeStr + " " + statement.name + " {\n" + enumMembers +  "};\n"
         }
 
-        if (statement.initializer.isPrivate) {
+        if (statement.isPrivate) {
             privStr = "static "
         }
 
-        return privStr + typeStr + " " + statement.name + " = " + genExpr(statement.initializer) + ";\n"
+        valCode: str = ""
+        if (statement.typeAnnotation == types.ANY) {
+            valCode = boxValue(statement.initializer)
+        } else {
+            valCode = coerceTo(statement.initializer, statement.typeAnnotation)
+        }
+
+        return privStr + typeStr + " " + statement.name + " = " + valCode + ";\n"
     }
     if (statement.type == statementTypes.RETURN_STATEMENT) {
-        if (statement.value ~= null) {
-            return "return " + genExpr(statement.value) + ";\n"
+        if (statement.value != null) {
+            valCode: str = ""
+            if (fnReturnType == types.ANY) {
+                valCode = boxValue(statement.value)
+            } else {
+                valCode = coerceTo(statement.value, fnReturnType)
+            }
+            return "return " + valCode + ";\n"
         } else {
             return "return;\n"
         }
@@ -296,27 +873,29 @@ private function genStatement(statement: table): str {
         return "break;\n"
     }
     if (statement.type == statementTypes.BLOCK_STATEMENT) {
-        return "{\n " + genStatementList(statement.statements) + "}\n"
+        return "{\n " + genStatementList(statement.statements, fnReturnType) + "}\n"
     }
     if (statement.type == statementTypes.WHILE_STATEMENT) {
-        return "while (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.body) + "}\n"
+        condCode = coerceTo(statement.condition, types.BOOLEAN)
+        return "while (" + condCode + ") {\n" + genStatementList(statement.body, fnReturnType) + "}\n"
     }
     if (statement.type == statementTypes.IF_STATEMENT) {
+        condCode = coerceTo(statement.condition, types.BOOLEAN)
         if (length(statement.elseBranch) > 0) {
-            out: str = "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "}"
+            out: str = "if (" + condCode + ") {\n" + genStatementList(statement.thenBranch, fnReturnType) + "}"
 
             if (length(statement.elseBranch) == 0) {
                 out = out + "\n"
                 return out
             } elseif (length(statement.elseBranch) == 1 && statement.elseBranch[0].type == statementTypes.IF_STATEMENT) {
-                out = out + "else " + genStatement(statement.elseBranch[0])
+                out = out + " else " + genStatement(statement.elseBranch[0], fnReturnType)
                 return out
             } else {
-                out = out + " else {\n" + genStatementList(statement.elseBranch) + "}\n"
+                out = out + " else {\n" + genStatementList(statement.elseBranch, fnReturnType) + "}\n"
                 return out
             }
         } else {
-            return "if (" + genExpr(statement.condition) + ") {\n" + genStatementList(statement.thenBranch) + "}\n"
+            return "if (" + condCode + ") {\n" + genStatementList(statement.thenBranch, fnReturnType) + "}\n"
         }
     }
     if (statement.type == statementTypes.FOR_STATEMENT) {
@@ -325,19 +904,130 @@ private function genStatement(statement: table): str {
             c2 = genExpr(statement.clause2)
             c3 = genExpr(statement.clause3)
 
-            return "for (" + c1 + "; " + c2 + "; " + c3 + ") {\n" + genStatementList(statement.body) + "}\n"
+            return "for (" + c1 + "; " + c2 + "; " + c3 + ") {\n" + genStatementList(statement.body, fnReturnType) + "}\n"
         } else {
             varName: str = statement.clause1.name
             startVal: str = genExpr(statement.clause1.value)
             stopVal: str = genExpr(statement.clause2)
             stepVal: str = "1"
-            if (statement.clause3 ~= null) {
+            if (statement.clause3 != null) {
                 stepVal = genExpr(statement.clause3)
             }
-            return "for (double " + varName + " = " + startVal + "; " + varName + " <= " + stopVal + "; " + varName + " += " + stepVal + ") {\n" + genStatementList(statement.body) + "}\n"
+            return "for (double " + varName + " = " + startVal + "; " + varName + " <= " + stopVal + "; " + varName + " += " + stepVal + ") {\n" + genStatementList(statement.body, fnReturnType) + "}\n"
         }
     }
     if (statement.type == statementTypes.IMPORT_STATEMENT) {
         return ""
     }
+
+    return ""
 }
+
+private function genFunction(statement: table): str {
+    retType: str = cType(statement.returnType)
+    params: str = ""
+
+    if (length(statement.parameters) == 0) {
+        params = ""
+    } else {
+        for i = 0, length(statement.parameters) - 1 {
+            p = statement.parameters[i]
+            if (i < length(statement.parameters) - 1) {
+                params = params + cType(p.type) + " " + p.name + ", "
+            } else {
+                params = params + cType(p.type) + " " + p.name
+            }
+        }
+    }
+
+    if (!statement.hasReturn) {
+        retType = "void"
+    }
+
+    if (length(statement.parameters) == 0) {
+        params = "void"
+    }
+
+    if (statement.isPrivate) {
+        retType = "static " + retType
+    }
+
+    body: str = genStatementList(statement.body, statement.returnType)
+
+    return retType + " " + statement.name + "(" + params + ") {\n" + body + "}\n"
+}
+
+
+private function generateProgram(statements: array): str {
+    headers: str = ""
+    functionsCode: str = ""
+    mainCode: str = ""
+    enumsCode: str = ""
+    globalsCode: str = ""
+
+    for i = 0, length(statements) - 1 {
+        stmt = statements[i]
+        if (stmt.type == statementTypes.FUNCTION_STATEMENT) {
+            functionsCode = functionsCode + genFunction(stmt) + "\n"
+            headers = headers + generateHeaders(stmt)
+        } elseif (stmt.type == statementTypes.VARDECLARE_STATEMENT) {
+            if (stmt.initializer.type == astTypes.ENUM_EXPR) {
+                enumsCode = enumsCode + genStatement(stmt, types.INTEGER)
+            } else {
+                typeStr: str = cType(stmt.typeAnnotation)
+                if (stmt.typeAnnotation == types.ANY || typeStr == "void") {
+                    typeStr = cType(stmt.initializer.inferredType)
+                }
+
+                valCode: str = ""
+                if (stmt.typeAnnotation == types.ANY) {
+                    valCode = boxValue(stmt.initializer)
+                } else {
+                    valCode = coerceTo(stmt.initializer, stmt.typeAnnotation)
+                }
+
+                prefix: str = ""
+                if (stmt.isPrivate) { prefix = "static " }
+
+                globalsCode = globalsCode + prefix + typeStr + " " + stmt.name + ";\n"
+                mainCode = mainCode + stmt.name + " = " + valCode + ";\n"
+            }
+        } else {
+            mainCode = mainCode + genStatement(stmt, types.INTEGER)
+        }
+    }
+
+    out: str = "#include <stdio.h>\n#include <stdbool.h>\n#include <stdlib.h>\n#include <stdint.h>\n#include \"borp_value.h\"\n#include \"borp_array.h\"\n#include \"borp_table.h\"\n#include \"borp_helpers.h\"\n\n"
+    out = out + enumsCode + "\n"
+    out = out + globalsCode + "\n"
+    out = out + headers + "\n"
+    out = out + functionsCode
+    out = out + "int main(int argc, char** argv) {\n"
+    out = out + "    borp_argc = argc;\n    borp_argv = argv;\n"
+    out = out + mainCode
+    out = out + "    return 0;\n"
+    out = out + "}\n"
+
+    return out
+}
+
+function testCompiler() {
+    inputPath: str = "src/borpc.borp"
+    outputPath: str = "test2.c"
+
+    if (argCount() >= 1) { inputPath = getArg(0) }
+    if (argCount() >= 2) { outputPath = getArg(1) }
+
+    source = readFile(inputPath)
+    tokens = tokenize(lexerState(source))
+    ast = parseProgram(parseState(tokens))
+
+    visited: table = {}
+    visited[inputPath] = true
+    ast = expandImports(ast, dirOf(inputPath), visited)
+
+    resolveProgram(ast)
+    writeFile(outputPath, generateProgram(ast))
+}
+
+testCompiler()

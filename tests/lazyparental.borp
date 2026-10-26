@@ -1,0 +1,8 @@
+function myParentFunction(passed) {
+    x = passed
+}
+
+function myChildFunction() -> lazy myParentFunction {
+    super(5)
+    print(x)
+}

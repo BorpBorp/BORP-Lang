@@ -1,4 +1,4 @@
-import "tokenTypes.borp"
+import "tokentypes.borp"
 
 keywords: table = {}
 
@@ -335,6 +335,8 @@ function tokenize(state): array {
             }
             elseif (c == ']') {
                 push(tokens, makeToken(state, tokenTypes.TOKEN_RBRACKET, ']'))
+            } elseif (c == '?') {
+                push(tokens, makeToken(state, tokenTypes.TOKEN_QUESTION, "?"))
             } else {
                 // Same thing here, meant to throw an error but no way yet since we only have print() but not a priority
             }

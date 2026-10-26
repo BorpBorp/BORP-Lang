@@ -48,5 +48,5 @@ tokenTypes: enum = {
     TOKEN_PRIVATE,
     TOKEN_OPPOSE,
     TOKEN_NULL,
-    TOKEN_PRIVATE
+    TOKEN_QUESTION
 }

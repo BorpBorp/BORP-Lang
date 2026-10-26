@@ -1,0 +1,7 @@
+function myParentFunction() {
+    x = 5
+}
+
+function myChildFunction() -> myParentFunction {
+    print(x)
+}
