@@ -11,13 +11,15 @@ function parseState(tokens: array) {
     return state
 }
 
+function skipNewlines(state) {
+    while (match(state, tokenTypes.TOKEN_NEWLINE)) {}
+}
+
 function parseProgram(state) {
     statements: array = []
 
     while (!isAtEnd(state)) {
-        while (check(state, tokenTypes.TOKEN_NEWLINE)) {
-            advance(state)
-        }
+        skipNewlines(state)
         if (isAtEnd(state)) {
             break
         }
@@ -56,7 +58,6 @@ function matchMulti(state: table, expectedTypes: array) {
     }
     return false
 }
-
 function consume(state: table, expectedType: num, errorMsg: str) {
     if (check(state, expectedType)) {
         tok = peek(state)
@@ -64,11 +65,10 @@ function consume(state: table, expectedType: num, errorMsg: str) {
         return tok
     }
 
-    tok = peek(state)
+    tok = peek(state)   
 
-    print("Parser Error on line " + tok.line + ": " + errorMsg)
-
-    return null
+    error("Parser error on line " + tok.line + ": " + errorMsg)
+    return tok
 }
 
 function advance(state: table): table {
@@ -111,7 +111,7 @@ private function parseBaseType(state: table): num {
     if (tokenType.value == "any") { return types.ANY }
     if (tokenType.value == "array") { return types.ARRAY }
 
-    print("Unknown type " + "'" + tokenType.value + "' " + tokenType.line)
+    error("Unknown type " + "'" + tokenType.value + "' " + tokenType.line)
     return -1
 }
 
@@ -122,7 +122,7 @@ private function desugarEnumTable(tableExpr: table): table {
         field = tableExpr.fields[i]
 
         if (field.value.type ~= astTypes.NUMBER_EXPR) {
-            print("parser error: enum member '" + field.key + "' must have a constant numeric value on line " + field.value.line)
+            error("parser error: enum member '" + field.key + "' must have a constant numeric value on line " + field.value.line)
         }
 
         numericVal = field.value.value
@@ -136,6 +136,7 @@ private function statementList(state: table, tokens: array) {
     statementList: array = []
 
     while (!isAtEnd(state)) {
+        skipNewlines(state)
         atTerminator: bool = false
         for i = 0, length(tokens) - 1 {
             if (check(state, tokens[i])) {
@@ -162,7 +163,7 @@ private function statement(state: table) {
         } elseif (check(state, tokenTypes.TOKEN_IDENTIFIER) && peekNext(state).type == tokenTypes.TOKEN_COLON) {
             inner = varDeclareStatement(state, isPrivate)
         } else {
-            print("'private' can only be used to modify a function or a typed variable declaration line: " + privToken.line)
+            error("'private' can only be used to modify a function or a typed variable declaration line: " + privToken.line)
         }
 
         return inner
@@ -233,7 +234,7 @@ private function localStatement(state: table, isPrivate: bool?) {
 
     if (declaredType == types.ENUM) {
         if (initializer.type ~= astTypes.TABLE_EXPR) {
-            print("expected a table literal ('{...}') to initialize an enum")
+            error("expected a table literal ('{...}') to initialize an enum")
         }
         initializer = desugarEnumTable(initializer)
     }
@@ -260,6 +261,7 @@ private function whileStatement(state: table) {
     move(state)
 
     condition = expression(state)
+    skipNewlines(state)
 
     body: array = []
 
@@ -280,9 +282,11 @@ private function forStatement(state: table) {
     line: num = advance(state).line
 
     clause1 = expression(state)
+    skipNewlines(state)
     expect(state, tokenTypes.TOKEN_COMMA, "expected ',' after first for-loop clause")
 
     clause2 = expression(state)
+    skipNewlines(state)
     
     isCStyle = false
     if (clause2.type == astTypes.BINARY_EXPR) {
@@ -293,6 +297,7 @@ private function forStatement(state: table) {
     }
 
     clause3 = null
+    skipNewlines(state)
 
     if (isCStyle) {
         expect(state, tokenTypes.TOKEN_COMMA, "expected ',' before for-loop increment")
@@ -300,6 +305,8 @@ private function forStatement(state: table) {
     } elseif (match(state, tokenTypes.TOKEN_COMMA)) {
         clause3 = expression(state)
     }
+
+    skipNewlines(state)
 
     body: array = []
     if (match(state, tokenTypes.TOKEN_LBRACE)) {
@@ -372,6 +379,19 @@ private function functionStatement(state: table, isPrivate: bool?) {
         isLazy = match(state, tokenTypes.TOKEN_LAZY) != null
         pToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "expected parent function name after '->'")
         parentName = pToken.value
+
+        if (match(state, tokenTypes.TOKEN_LPAREN)) {
+            if (!check(state, tokenTypes.TOKEN_RPAREN)) {
+                push(parentArgs, expression(state))
+                while (match(state, tokenTypes.TOKEN_COMMA)) {
+                    if (check(state, tokenTypes.TOKEN_RPAREN)) {
+                        break
+                    }
+                    push(parentArgs, expression(state))
+                }
+            }
+            expect(state, tokenTypes.TOKEN_RPAREN, "expected ')' after parent arguments")
+        }
     }
 
     body: array = []
@@ -432,7 +452,7 @@ private function varDeclareStatement(state: table, isPrivate: bool?) {
 
     if (declaredType == types.ENUM) {
         if (initializer.type ~= astTypes.TABLE_EXPR) {
-            print("Expected a table literal '{...}' to initialize an enum on line: " + line)
+            error("Expected a table literal '{...}' to initialize an enum on line: " + line)
         }
         initializer = desugarEnumTable(initializer)
     }
@@ -451,6 +471,7 @@ private function ifStatement(state: table) {
     move(state)
 
     condition = expression(state)
+    skipNewlines(state)
     thenBranch: array = []
     elseBranch: array = []
 
@@ -459,6 +480,7 @@ private function ifStatement(state: table) {
 
         thenBranch = statementList(state, [tokenTypes.TOKEN_RBRACE])
         expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close body")
+        skipNewlines(state)
 
         if (check(state, tokenTypes.TOKEN_ELSEIF)) {
             push(elseBranch, ifStatement(state))
@@ -593,13 +615,15 @@ private function assignment(state: table) {
             return makeIndexAssignExpr(expr.target, expr.key, value, line)
         }
 
-        print("Invalid assignment target line:" + line)
+        error("Invalid assignment target line:" + line)
     }
 
     return expr
 }
 
 private function primaryBase(state: table): table {
+    skipNewlines(state)
+
     if (check(state, tokenTypes.TOKEN_NUMBER)) {
         token: table = consume(state, tokenTypes.TOKEN_NUMBER, "Unexpected type detected")
         return makeNumberExpr(token.value, token.line)
@@ -618,6 +642,7 @@ private function primaryBase(state: table): table {
     if (check(state, tokenTypes.TOKEN_LPAREN)) {
         move(state)
         valExpr = expression(state)
+        skipNewlines(state)
         expect(state, tokenTypes.TOKEN_RPAREN, "expected ')' after expression")
         return valExpr
     }
@@ -627,9 +652,10 @@ private function primaryBase(state: table): table {
         fields: array = []
         index: num = 0
 
+        skipNewlines(state)
         if (!check(state, tokenTypes.TOKEN_RBRACE)) {
             while (true) {
-                if (check(state, tokenTypes.TOKEN_IDENTIFIER) && (peekNext(state).type == tokenTypes.TOKEN_ASSIGN || peekNext(state).type == tokenTypes.TOKEN_COLON || peekNext(state).type == tokenTypes.TOKEN_COMMA || peekNext(state).type == tokenTypes.TOKEN_RBRACE)) {
+                if (check(state, tokenTypes.TOKEN_IDENTIFIER) && (peekNext(state).type == tokenTypes.TOKEN_ASSIGN || peekNext(state).type == tokenTypes.TOKEN_COLON || peekNext(state).type == tokenTypes.TOKEN_COMMA || peekNext(state).type == tokenTypes.TOKEN_RBRACE || peekNext(state).type == tokenTypes.TOKEN_NEWLINE)) {
                     nameToken = expect(state, tokenTypes.TOKEN_IDENTIFIER, "Expected field name")
 
                     if (match(state, tokenTypes.TOKEN_ASSIGN)) {
@@ -643,7 +669,7 @@ private function primaryBase(state: table): table {
                         valExpr: table = expression(state)
                         if (fType == types.ENUM) {
                             if (valExpr.type ~= astTypes.TABLE_EXPR) {
-                                print("expected a table literal ('{...}') to initialize an enum on line " + valExpr.line)
+                                error("expected a table literal ('{...}') to initialize an enum on line " + valExpr.line)
                             }
                             valExpr = desugarEnumTable(valExpr)
                         }
@@ -661,6 +687,7 @@ private function primaryBase(state: table): table {
                 }
 
                 if (match(state, tokenTypes.TOKEN_COMMA)) {
+                    skipNewlines(state)
                     if (check(state, tokenTypes.TOKEN_RBRACE)) {
                         break
                     }
@@ -669,6 +696,7 @@ private function primaryBase(state: table): table {
                 }
             }
         }
+        skipNewlines(state)
         expect(state, tokenTypes.TOKEN_RBRACE, "expected '}' to close table literal")
         return makeTableExpr(fields, token.line)
     }
@@ -677,12 +705,14 @@ private function primaryBase(state: table): table {
         token: table = consume(state, tokenTypes.TOKEN_LBRACKET, "expected '['")
         elements: array = []
 
+        skipNewlines(state)
         if (!check(state, tokenTypes.TOKEN_RBRACKET)) {
             while (true) {
                 valExpr = expression(state)
                 push(elements, valExpr)
 
                 if (match(state, tokenTypes.TOKEN_COMMA)) {
+                    skipNewlines(state)
                     if (check(state, tokenTypes.TOKEN_RBRACKET)) {
                         break
                     }
@@ -691,6 +721,7 @@ private function primaryBase(state: table): table {
                 }
             }
         }
+        skipNewlines(state)
         expect(state, tokenTypes.TOKEN_RBRACKET, "expected ']' to close array literal")
         return makeArrayExpr(elements, token.line)
     }
@@ -710,7 +741,8 @@ private function primaryBase(state: table): table {
         return makeNullExpr(token.line)
     }
 
-    print("Expected expression at line " + peek(state).line)
+    error("Expected expression at line " + peek(state).line)
+    move(state)
     return {}
 }
 
@@ -753,6 +785,7 @@ private function finishCall(state: table, callee, line) {
         }
     }
 
+    skipNewlines(state)
     expect(state, tokenTypes.TOKEN_RPAREN, "expected ')' after arguments")
     return makeCallExpr(callee, arguments, line)
 }

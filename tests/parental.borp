@@ -1,7 +1,9 @@
-function myParentFunction() {
-    x = 5
-}
-
-function myChildFunction() -> myParentFunction {
+function base(x) {
     print(x)
 }
+
+function child(x) -> base {
+    print("child")
+}
+
+child(5)

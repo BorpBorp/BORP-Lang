@@ -68,6 +68,7 @@ static inline void borp_fatal(const char* msg) {
 #endif
     exit(1);
 }
+#define error(msg) borp_fatal(msg)
 
 static inline const char* borp_type_name(BorpValueType t) {
     switch (t) {

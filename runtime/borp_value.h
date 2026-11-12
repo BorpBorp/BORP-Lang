@@ -9,8 +9,6 @@
 
 struct BorpArray;
 struct BorpTable;
-struct parentContext;
-struct childContext;
 
 typedef enum {
     VAL_NULL,
@@ -31,14 +29,6 @@ typedef struct BorpValue {
         struct BorpTable* borp_table;
     } as;
 } BorpValue;
-
-typedef struct parentContext {
-
-} parentContext;
-
-typedef struct childContext {
-
-} childContext;
 
 static inline BorpValue borp_val_null(void) { 
     return (BorpValue){.type = VAL_NULL}; 

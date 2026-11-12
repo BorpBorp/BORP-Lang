@@ -34,6 +34,41 @@ private function isComparative(tokenType: num): bool {
     return false
 }
 
+function countFunctionVariables(funcNode): num {
+    totalVars: num = length(funcNode.parameters)
+
+    totalVars = totalVars + countBlockVariables(funcNode.body)
+
+    return totalVars
+}
+
+function countBlockVariables(statements: array): num {
+    count: num = 0
+
+    for i = 0, length(statements) - 1 {
+        stmt = statements[i]
+
+        if (stmt.type == statementTypes.VARDECLARE_STATEMENT) {
+            count = count + 1
+        }
+        elseif (stmt.type == statementTypes.FOR_STATEMENT) {
+            count = count + 1 + countBlockVariables(stmt.body)
+        }
+        elseif (stmt.type == statementTypes.IF_STATEMENT) {
+            count = count + countBlockVariables(stmt.thenBranch)
+            count = count + countBlockVariables(stmt.elseBranch)
+        }
+        elseif (stmt.type == statementTypes.WHILE_STATEMENT) {
+            count = count + countBlockVariables(stmt.body)
+        }
+        elseif (stmt.type == statementTypes.BLOCK_STATEMENT) {
+            count = count + countBlockVariables(stmt.statements)
+        }
+    }
+
+    return count
+}
+
 private function isEnumRef(target: table, env: table): bool {
     if (target.type == astTypes.IDENTIFIER_EXPR && lookupEnv(env, target.value) == types.ENUM) {
         return true
@@ -70,6 +105,16 @@ private function lookupFunc(env, name): table? {
         return env.funcs[name]
     } elseif (env.parent ~= null) {
         return lookupFunc(env.parent, name)
+    } else {
+        return null
+    }
+}
+
+private function lookupCurrentFn(env: table): table? {
+    if (env.fnStmt ~= null) {
+        return env.fnStmt
+    } elseif (env.parent ~= null) {
+        return lookupCurrentFn(env.parent)
     } else {
         return null
     }
@@ -155,7 +200,18 @@ private function resolveExpr(expr: table, env: table): num {
 
         return valType
     } elseif (expr.type == astTypes.CALL_EXPR) {
-        sig: table? = lookupFunc(env, expr.callee.value)
+        calleeName: str = expr.callee.value
+
+        if (calleeName == "super") {
+            currentFn: table? = lookupCurrentFn(env)
+            if (currentFn == null || currentFn.parentName == "") {
+                error("Compile error on line " + expr.line + ": super() used in a function with no parent")
+            } else {
+                calleeName = currentFn.parentName
+            }
+        }
+
+        sig: table? = lookupFunc(env, calleeName)
 
         for i = 0, length(expr.arguments) - 1 {
             resolveExpr(expr.arguments[i], env)
@@ -169,7 +225,11 @@ private function resolveExpr(expr: table, env: table): num {
             expr.cName = sig.cName
         }
 
-        returnType: num? = lookupEnv(env, expr.callee.value)
+        if (calleeName ~= expr.callee.value) {
+            expr.cName = calleeName
+        }
+
+        returnType: num? = lookupEnv(env, calleeName)
         if (returnType == null) {
             returnType = types.ANY
         }
@@ -228,8 +288,22 @@ private function resolveStatement(stmt, env) {
     } elseif (stmt.type == statementTypes.FUNCTION_STATEMENT) {
         defineEnv(env, stmt.name, stmt.returnType)
         env.funcs[stmt.name] = stmt
+        
+        stmt.varCount = countFunctionVariables(stmt)
 
         fnEnv: table = createEnv(env)
+        fnEnv.fnStmt = stmt
+
+        if (stmt.parentName ~= "" && !stmt.isLazy) {
+            parentSig: table? = lookupFunc(env, stmt.parentName)
+            if (parentSig == null) {
+                print("Compile error on line " + stmt.line + ": parent function '" + stmt.parentName + "' not found")
+            } elseif (length(parentSig.parameters) ~= length(stmt.parameters)) {
+                print("Compile error on line " + stmt.line + ": '" + stmt.name + "' passes " + length(stmt.parameters) + " argument(s) to '" + stmt.parentName + "' but it takes " + length(parentSig.parameters))
+            } else {
+                stmt.parentSig = parentSig
+            }
+        }
 
         for i = 0, length(stmt.parameters) - 1 {
             defineEnv(fnEnv, stmt.parameters[i].name, stmt.parameters[i].type)
@@ -310,6 +384,7 @@ function resolveProgram(statements: array) {
     defineBuiltin(globalEnv, "runCommand", "borp_run_command",  types.NUMBER,  [types.STRING])
     defineBuiltin(globalEnv, "argCount",   "borp_arg_count",    types.NUMBER,  [])
     defineBuiltin(globalEnv, "getArg",     "borp_get_arg",      types.STRING,  [types.NUMBER])
+    defineBuiltin(globalEnv, "error",      "borp_fatal",        types.ANY,  [])
 
     resolveStatementList(statements, globalEnv)
 }
@@ -953,6 +1028,28 @@ private function genFunction(statement: table): str {
     }
 
     body: str = genStatementList(statement.body, statement.returnType)
+
+    if (statement.parentSig ~= null) {
+        callArgs: str = ""
+        for i = 0, length(statement.parameters) - 1 {
+            cp = statement.parameters[i]
+            pp = statement.parentSig.parameters[i]
+
+            arg: table = makeIdentifierExpr(cp.name, statement.line)
+            arg.inferredType = cp.type
+
+            argCode: str = coerceTo(arg, pp.type)
+            if (pp.type == types.ANY) {
+                argCode = boxValue(arg)
+            }
+
+            if (i > 0) {
+                callArgs = callArgs + ", "
+            }
+            callArgs = callArgs + argCode
+        }
+        body = statement.parentSig.name + "(" + callArgs + ");\n" + body
+    }
 
     return retType + " " + statement.name + "(" + params + ") {\n" + body + "}\n"
 }

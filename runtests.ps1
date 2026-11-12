@@ -53,12 +53,16 @@ Get-ChildItem $TestDir -Filter *.borp | Sort-Object Name | ForEach-Object {
     $exe   = Join-Path $outDir "$name.exe"
     Remove-Item $cfile, $exe -ErrorAction SilentlyContinue
 
-    # Expected output comes from the interpreter
-    $interpText = (& $Interpreter $src 2>&1) | Out-String
-    $marker = "Executing Program Output:"
-    $pos = $interpText.IndexOf($marker)
-    if ($pos -ge 0) { $interpText = $interpText.Substring($pos + $marker.Length) }
-    $expected = (Norm $interpText).TrimStart("`r", "`n")
+    $expectedFile = Join-Path $TestDir "$name.expected.txt"
+    if (Test-Path $expectedFile) {
+        $expected = Norm (Get-Content $expectedFile -Raw)
+    } else {
+        $interpText = (& $Interpreter $src 2>&1) | Out-String
+        $marker = "Executing Program Output:"
+        $pos = $interpText.IndexOf($marker)
+        if ($pos -ge 0) { $interpText = $interpText.Substring($pos + $marker.Length) }
+        $expected = (Norm $interpText).TrimStart("`r", "`n")
+    }
 
     # borp -> C
     & $Compiler $src $cfile 2>&1 | Out-File -Encoding utf8 (Join-Path $outDir "$name.compile.log")

@@ -1,8 +1,10 @@
-function myParentFunction(passed) {
-    x = passed
+function base(x) {
+    print(x * 2)
 }
 
-function myChildFunction() -> lazy myParentFunction {
-    super(5)
-    print(x)
+function child(a) -> lazy base {
+    super(a + 1)
+    print("after")
 }
+
+child(3)

@@ -193,7 +193,7 @@ function tokenize(state): array {
 
         if (c == '\n') {
             state.line = state.line + 1
-            makeToken(state, tokenTypes.TOKEN_NEWLINE, '\n')
+            push(tokens, makeToken(state, tokenTypes.TOKEN_NEWLINE, '\n'))
             move(state)
         }
         elseif (c == ' ' || c == '\t' || c == '\r') {

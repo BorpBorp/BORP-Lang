@@ -1,5 +1,0 @@
-test: enum = {
-    RED
-}
-
-print(test.RED)
