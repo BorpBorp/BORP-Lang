@@ -1,0 +1,5 @@
+*.exe
+stage*.c
+next*.c
+test2.c
+tests/out/
